@@ -20,54 +20,54 @@
 /// the `flush` should accurately represent that set of possibilities. The `NIOCompositeError`
 /// is an attempt to do so.
 public struct NIOCompositeError: Error {
-    private let errors: [Error]
+  private let errors: [Error]
 
-    public init(comprising errors: [Error]) {
-        self.errors = errors
-    }
+  public init(comprising errors: [Error]) {
+    self.errors = errors
+  }
 }
 
 extension NIOCompositeError: Sequence {
-    public func makeIterator() -> Array<Error>.Iterator {
-        return self.errors.makeIterator()
-    }
+  public func makeIterator() -> Array<Error>.Iterator {
+    return self.errors.makeIterator()
+  }
 }
 
 extension NIOCompositeError: RandomAccessCollection {
-    public typealias Element = Error
-    public typealias Index = Array<Error>.Index
-    public typealias Indices = Array<Error>.Indices
-    public typealias SubSequence = Array<Error>.SubSequence
+  public typealias Element = Error
+  public typealias Index = Array<Error>.Index
+  public typealias Indices = Array<Error>.Indices
+  public typealias SubSequence = Array<Error>.SubSequence
 
-    public var endIndex: Index {
-        return self.errors.endIndex
-    }
+  public var endIndex: Index {
+    return self.errors.endIndex
+  }
 
-    public var startIndex: Index {
-        return self.errors.startIndex
-    }
+  public var startIndex: Index {
+    return self.errors.startIndex
+  }
 
-    public var indices: Indices {
-        return self.errors.indices
-    }
+  public var indices: Indices {
+    return self.errors.indices
+  }
 
-    public subscript(position: Index) -> Element {
-        return self.errors[position]
-    }
+  public subscript(position: Index) -> Element {
+    return self.errors[position]
+  }
 
-    public subscript(bounds: Range<Index>) -> SubSequence {
-        return self.errors[bounds]
-    }
+  public subscript(bounds: Range<Index>) -> SubSequence {
+    return self.errors[bounds]
+  }
 }
 
 extension NIOCompositeError: CustomStringConvertible {
-    public var description: String {
-        return "NIOCompositeError\(String(describing: self.errors))"
-    }
+  public var description: String {
+    return "NIOCompositeError\(String(describing: self.errors))"
+  }
 }
 
 extension NIOCompositeError: CustomDebugStringConvertible {
-    public var debugDescription: String {
-        return self.description
-    }
+  public var debugDescription: String {
+    return self.description
+  }
 }

@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 /// A protocol that covers an object that does DNS lookups.
 ///
 /// In general the rules for the resolver are relatively broad: there are no specific requirements on how
@@ -22,28 +21,28 @@
 /// implementations, so any implementation based on getaddrinfo will work just fine. In the future, a custom
 /// resolver will need also to implement these sorting rules.
 public protocol Resolver {
-    /// Initiate a DNS A query for a given host.
-    ///
-    /// - parameters:
-    ///     - host: The hostname to do an A lookup on.
-    ///     - port: The port we'll be connecting to.
-    /// - returns: An `EventLoopFuture` that fires with the result of the lookup.
-    func initiateAQuery(host: String, port: Int) -> EventLoopFuture<[SocketAddress]>
+  /// Initiate a DNS A query for a given host.
+  ///
+  /// - parameters:
+  ///     - host: The hostname to do an A lookup on.
+  ///     - port: The port we'll be connecting to.
+  /// - returns: An `EventLoopFuture` that fires with the result of the lookup.
+  func initiateAQuery(host: String, port: Int) -> EventLoopFuture<[SocketAddress]>
 
-    /// Initiate a DNS AAAA query for a given host.
-    ///
-    /// - parameters:
-    ///     - host: The hostname to do an AAAA lookup on.
-    ///     - port: The port we'll be connecting to.
-    /// - returns: An `EventLoopFuture` that fires with the result of the lookup.
-    func initiateAAAAQuery(host: String, port: Int) -> EventLoopFuture<[SocketAddress]>
+  /// Initiate a DNS AAAA query for a given host.
+  ///
+  /// - parameters:
+  ///     - host: The hostname to do an AAAA lookup on.
+  ///     - port: The port we'll be connecting to.
+  /// - returns: An `EventLoopFuture` that fires with the result of the lookup.
+  func initiateAAAAQuery(host: String, port: Int) -> EventLoopFuture<[SocketAddress]>
 
-    /// Cancel all outstanding DNS queries.
-    ///
-    /// This method is called whenever queries that have not completed no longer have their
-    /// results needed. The resolver should, if possible, abort any outstanding queries and
-    /// clean up their state.
-    ///
-    /// This method is not guaranteed to terminate the outstanding queries.
-    func cancelQueries()
+  /// Cancel all outstanding DNS queries.
+  ///
+  /// This method is called whenever queries that have not completed no longer have their
+  /// results needed. The resolver should, if possible, abort any outstanding queries and
+  /// clean up their state.
+  ///
+  /// This method is not guaranteed to terminate the outstanding queries.
+  func cancelQueries()
 }

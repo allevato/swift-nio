@@ -18,119 +18,127 @@
 /// writes and mark how far through the buffer the user has flushed, and therefore how far through the buffer is
 /// safe to write.
 public struct MarkedCircularBuffer<E>: CustomStringConvertible, AppendableCollection {
-    public typealias RangeType<Bound> = Range<Bound> where Bound: Strideable, Bound.Stride: SignedInteger
+  public typealias RangeType<Bound> = Range<
+    Bound
+  >where Bound: Strideable, Bound.Stride: SignedInteger
 
-    private var buffer: CircularBuffer<E>
-    private var markedIndex: Int = -1 /* negative: nothing marked */
+  private var buffer: CircularBuffer<E>
+  private var markedIndex: Int = -1  /* negative: nothing marked */
 
-    /// Create a new instance.
-    ///
-    /// - paramaters:
-    ///     - initialRingCapacity: The initial capacity of the internal storage.
-    public init(initialRingCapacity: Int) {
-        self.buffer = CircularBuffer(initialRingCapacity: initialRingCapacity)
+
+  /// Create a new instance.
+  ///
+  /// - paramaters:
+  ///     - initialRingCapacity: The initial capacity of the internal storage.
+  public init(initialRingCapacity: Int) {
+    self.buffer = CircularBuffer(initialRingCapacity: initialRingCapacity)
+  }
+
+  // MARK: Forwarding
+
+  /// Appends an entry to the buffer, expanding it if needed.
+  public mutating func append(_ value: E) {
+    self.buffer.append(value)
+  }
+
+  /// Removes the first element from the buffer.
+  public mutating func removeFirst() -> E {
+    assert(self.buffer.count > 0)
+    if self.markedIndex != -1 {
+      self.markedIndex -= 1
     }
+    return self.buffer.removeFirst()
+  }
 
-    // MARK: Forwarding
+  /// The first element in the buffer.
+  public var first: E? {
+    return self.buffer.first
+  }
 
-    /// Appends an entry to the buffer, expanding it if needed.
-    public mutating func append(_ value: E) {
-        self.buffer.append(value)
+  /// If the buffer is empty.
+  public var isEmpty: Bool {
+    return self.buffer.isEmpty
+  }
+
+  /// The number of elements in the buffer.
+  public var count: Int {
+    return self.buffer.count
+  }
+
+  /// Retrieves the element at the given index from the buffer, without removing it.
+  public subscript(index: Int) -> E {
+    get {
+      return self.buffer[index]
     }
-
-    /// Removes the first element from the buffer.
-    public mutating func removeFirst() -> E {
-        assert(self.buffer.count > 0)
-        if self.markedIndex != -1 {
-            self.markedIndex -= 1
-        }
-        return self.buffer.removeFirst()
+    set {
+      self.buffer[index] = newValue
     }
+  }
 
-    /// The first element in the buffer.
-    public var first: E? {
-        return self.buffer.first
+  /// The valid indices into the buffer.
+  public var indices: RangeType<Int> {
+    return self.buffer.indices
+  }
+
+  public var startIndex: Int { return self.buffer.startIndex }
+
+  public var endIndex: Int { return self.buffer.endIndex }
+
+  public func index(after i: Int) -> Int {
+    return self.buffer.index(after: i)
+  }
+
+  public var description: String {
+    return self.buffer.description
+  }
+
+  // MARK: Marking
+
+  /// Marks the buffer at the current index, making the last index in the buffer marked.
+  public mutating func mark() {
+    let count = self.buffer.count
+    if count > 0 {
+      self.markedIndex = count - 1
     }
-
-    /// If the buffer is empty.
-    public var isEmpty: Bool {
-        return self.buffer.isEmpty
+    else {
+      assert(self.markedIndex == -1, "marked index is \(self.markedIndex)")
     }
+  }
 
-    /// The number of elements in the buffer.
-    public var count: Int {
-        return self.buffer.count
+  /// Returns true if the buffer is currently marked at the given index.
+  public func isMarked(index: Int) -> Bool {
+    precondition(index >= 0, "index must not be negative")
+    precondition(
+      index < self.buffer.count,
+      "index \(index) out of range (0..<\(self.buffer.count))")
+    return self.markedIndex == index
+  }
+
+  /// Returns the index of the marked element.
+  public var markedElementIndex: Int? {
+    let markedIndex = self.markedIndex
+    if markedIndex >= 0 {
+      return markedIndex
     }
-
-    /// Retrieves the element at the given index from the buffer, without removing it.
-    public subscript(index: Int) -> E {
-        get {
-            return self.buffer[index]
-        }
-        set {
-            self.buffer[index] = newValue
-        }
+    else {
+      assert(markedIndex == -1, "marked index is \(markedIndex)")
+      return nil
     }
+  }
 
-    /// The valid indices into the buffer.
-    public var indices: RangeType<Int> {
-        return self.buffer.indices
+  /// Returns the marked element.
+  public var markedElement: E? {
+    return self.markedElementIndex.map { self.buffer[$0] }
+  }
+
+  /// Returns true if the buffer has been marked at all.
+  public var hasMark: Bool {
+    if self.markedIndex < 0 {
+      assert(self.markedIndex == -1, "marked index is \(self.markedIndex)")
+      return false
     }
-
-    public var startIndex: Int { return self.buffer.startIndex }
-
-    public var endIndex: Int { return self.buffer.endIndex }
-
-    public func index(after i: Int) -> Int {
-        return self.buffer.index(after: i)
+    else {
+      return true
     }
-
-    public var description: String {
-        return self.buffer.description
-    }
-
-    // MARK: Marking
-
-    /// Marks the buffer at the current index, making the last index in the buffer marked.
-    public mutating func mark() {
-        let count = self.buffer.count
-        if count > 0 {
-            self.markedIndex = count - 1
-        } else {
-            assert(self.markedIndex == -1, "marked index is \(self.markedIndex)")
-        }
-    }
-
-    /// Returns true if the buffer is currently marked at the given index.
-    public func isMarked(index: Int) -> Bool {
-        precondition(index >= 0, "index must not be negative")
-        precondition(index < self.buffer.count, "index \(index) out of range (0..<\(self.buffer.count))")
-        return self.markedIndex == index
-    }
-
-    /// Returns the index of the marked element.
-    public var markedElementIndex: Int? {
-        let markedIndex = self.markedIndex
-        if markedIndex >= 0 {
-            return markedIndex
-        } else {
-            assert(markedIndex == -1, "marked index is \(markedIndex)")
-            return nil
-        }
-    }
-
-    /// Returns the marked element.
-    public var markedElement: E? {
-        return self.markedElementIndex.map { self.buffer[$0] }
-    }
-
-    /// Returns true if the buffer has been marked at all.
-    public var hasMark: Bool {
-        if self.markedIndex < 0 {
-            assert(self.markedIndex == -1, "marked index is \(self.markedIndex)")
-            return false
-        } else {
-            return true
-        }
-    }
+  }
 }

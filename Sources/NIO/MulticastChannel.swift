@@ -17,75 +17,84 @@
 ///
 /// - note: As with `Channel`, all operations on a `MulticastChannel` are thread-safe.
 public protocol MulticastChannel: Channel {
-    /// Request that the `MulticastChannel` join the multicast group given by `group`.
-    ///
-    /// - parameters:
-    ///     - group: The IP address corresponding to the relevant multicast group.
-    ///     - promise: The `EventLoopPromise` that will be notified once the operation is complete, or
-    ///         `nil` if you are not interested in the result of the operation.
-    func joinGroup(_ group: SocketAddress, promise: EventLoopPromise<Void>?)
+  /// Request that the `MulticastChannel` join the multicast group given by `group`.
+  ///
+  /// - parameters:
+  ///     - group: The IP address corresponding to the relevant multicast group.
+  ///     - promise: The `EventLoopPromise` that will be notified once the operation is complete, or
+  ///         `nil` if you are not interested in the result of the operation.
+  func joinGroup(_ group: SocketAddress, promise: EventLoopPromise<Void>?)
 
-    /// Request that the `MulticastChannel` join the multicast group given by `group` on the interface
-    /// given by `interface`.
-    ///
-    /// - parameters:
-    ///     - group: The IP address corresponding to the relevant multicast group.
-    ///     - interface: The interface on which to join the given group, or `nil` to allow the kernel to choose.
-    ///     - promise: The `EventLoopPromise` that will be notified once the operation is complete, or
-    ///         `nil` if you are not interested in the result of the operation.
-    func joinGroup(_ group: SocketAddress, interface: NIONetworkInterface?, promise: EventLoopPromise<Void>?)
+  /// Request that the `MulticastChannel` join the multicast group given by `group` on the interface
+  /// given by `interface`.
+  ///
+  /// - parameters:
+  ///     - group: The IP address corresponding to the relevant multicast group.
+  ///     - interface: The interface on which to join the given group, or `nil` to allow the kernel to choose.
+  ///     - promise: The `EventLoopPromise` that will be notified once the operation is complete, or
+  ///         `nil` if you are not interested in the result of the operation.
+  func joinGroup(
+    _ group: SocketAddress,
+    interface: NIONetworkInterface?,
+    promise: EventLoopPromise<Void>?
+  )
 
-    /// Request that the `MulticastChannel` leave the multicast group given by `group`.
-    ///
-    /// - parameters:
-    ///     - group: The IP address corresponding to the relevant multicast group.
-    ///     - promise: The `EventLoopPromise` that will be notified once the operation is complete, or
-    ///         `nil` if you are not interested in the result of the operation.
-    func leaveGroup(_ group: SocketAddress, promise: EventLoopPromise<Void>?)
+  /// Request that the `MulticastChannel` leave the multicast group given by `group`.
+  ///
+  /// - parameters:
+  ///     - group: The IP address corresponding to the relevant multicast group.
+  ///     - promise: The `EventLoopPromise` that will be notified once the operation is complete, or
+  ///         `nil` if you are not interested in the result of the operation.
+  func leaveGroup(_ group: SocketAddress, promise: EventLoopPromise<Void>?)
 
-    /// Request that the `MulticastChannel` leave the multicast group given by `group` on the interface
-    /// given by `interface`.
-    ///
-    /// - parameters:
-    ///     - group: The IP address corresponding to the relevant multicast group.
-    ///     - interface: The interface on which to leave the given group, or `nil` to allow the kernel to choose.
-    ///     - promise: The `EventLoopPromise` that will be notified once the operation is complete, or
-    ///         `nil` if you are not interested in the result of the operation.
-    func leaveGroup(_ group: SocketAddress, interface: NIONetworkInterface?, promise: EventLoopPromise<Void>?)
+  /// Request that the `MulticastChannel` leave the multicast group given by `group` on the interface
+  /// given by `interface`.
+  ///
+  /// - parameters:
+  ///     - group: The IP address corresponding to the relevant multicast group.
+  ///     - interface: The interface on which to leave the given group, or `nil` to allow the kernel to choose.
+  ///     - promise: The `EventLoopPromise` that will be notified once the operation is complete, or
+  ///         `nil` if you are not interested in the result of the operation.
+  func leaveGroup(
+    _ group: SocketAddress,
+    interface: NIONetworkInterface?,
+    promise: EventLoopPromise<Void>?
+  )
 }
 
-
 // MARK:- Default implementations for MulticastChannel
-public extension MulticastChannel {
-    func joinGroup(_ group: SocketAddress, promise: EventLoopPromise<Void>?) {
-        self.joinGroup(group, interface: nil, promise: promise)
-    }
+extension MulticastChannel {
+  public func joinGroup(_ group: SocketAddress, promise: EventLoopPromise<Void>?) {
+    self.joinGroup(group, interface: nil, promise: promise)
+  }
 
-    func joinGroup(_ group: SocketAddress) -> EventLoopFuture<Void> {
-        let promise = self.eventLoop.makePromise(of: Void.self)
-        self.joinGroup(group, promise: promise)
-        return promise.futureResult
-    }
+  public func joinGroup(_ group: SocketAddress) -> EventLoopFuture<Void> {
+    let promise = self.eventLoop.makePromise(of: Void.self)
+    self.joinGroup(group, promise: promise)
+    return promise.futureResult
+  }
 
-    func joinGroup(_ group: SocketAddress, interface: NIONetworkInterface?) -> EventLoopFuture<Void> {
-        let promise = self.eventLoop.makePromise(of: Void.self)
-        self.joinGroup(group, interface: interface, promise: promise)
-        return promise.futureResult
-    }
+  public func joinGroup(_ group: SocketAddress, interface: NIONetworkInterface?)
+  -> EventLoopFuture<Void> {
+    let promise = self.eventLoop.makePromise(of: Void.self)
+    self.joinGroup(group, interface: interface, promise: promise)
+    return promise.futureResult
+  }
 
-    func leaveGroup(_ group: SocketAddress, promise: EventLoopPromise<Void>?) {
-        self.leaveGroup(group, interface: nil, promise: promise)
-    }
+  public func leaveGroup(_ group: SocketAddress, promise: EventLoopPromise<Void>?) {
+    self.leaveGroup(group, interface: nil, promise: promise)
+  }
 
-    func leaveGroup(_ group: SocketAddress) -> EventLoopFuture<Void> {
-        let promise = self.eventLoop.makePromise(of: Void.self)
-        self.leaveGroup(group, promise: promise)
-        return promise.futureResult
-    }
+  public func leaveGroup(_ group: SocketAddress) -> EventLoopFuture<Void> {
+    let promise = self.eventLoop.makePromise(of: Void.self)
+    self.leaveGroup(group, promise: promise)
+    return promise.futureResult
+  }
 
-    func leaveGroup(_ group: SocketAddress, interface: NIONetworkInterface?) -> EventLoopFuture<Void> {
-        let promise = self.eventLoop.makePromise(of: Void.self)
-        self.leaveGroup(group, interface: interface, promise: promise)
-        return promise.futureResult
-    }
+  public func leaveGroup(_ group: SocketAddress, interface: NIONetworkInterface?)
+  -> EventLoopFuture<Void> {
+    let promise = self.eventLoop.makePromise(of: Void.self)
+    self.leaveGroup(group, interface: interface, promise: promise)
+    return promise.futureResult
+  }
 }

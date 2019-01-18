@@ -15,22 +15,22 @@
 import Dispatch
 
 private final class EmbeddedScheduledTask {
-    let task: () -> Void
-    let readyTime: UInt64
+  let task: () -> Void
+  let readyTime: UInt64
 
-    init(readyTime: UInt64, task: @escaping () -> Void) {
-        self.readyTime = readyTime
-        self.task = task
-    }
+  init(readyTime: UInt64, task: @escaping () -> Void) {
+    self.readyTime = readyTime
+    self.task = task
+  }
 }
 
 extension EmbeddedScheduledTask: Comparable {
-    public static func < (lhs: EmbeddedScheduledTask, rhs: EmbeddedScheduledTask) -> Bool {
-        return lhs.readyTime < rhs.readyTime
-    }
-    public static func == (lhs: EmbeddedScheduledTask, rhs: EmbeddedScheduledTask) -> Bool {
-        return lhs === rhs
-    }
+  public static func < (lhs: EmbeddedScheduledTask, rhs: EmbeddedScheduledTask) -> Bool {
+    return lhs.readyTime < rhs.readyTime
+  }
+  public static func == (lhs: EmbeddedScheduledTask, rhs: EmbeddedScheduledTask) -> Bool {
+    return lhs === rhs
+  }
 }
 
 /// An `EventLoop` that is embedded in the current running context with no external
@@ -47,215 +47,224 @@ extension EmbeddedScheduledTask: Comparable {
 ///     responsible for ensuring they never call into the `EmbeddedEventLoop` in an
 ///     unsynchronized fashion.
 public class EmbeddedEventLoop: EventLoop {
-    /// The current "time" for this event loop. This is an amount in nanoseconds.
-    private var now: UInt64 = 0
+  /// The current "time" for this event loop. This is an amount in nanoseconds.
+  private var now: UInt64 = 0
 
-    private var scheduledTasks = PriorityQueue<EmbeddedScheduledTask>(ascending: true)
+  private var scheduledTasks = PriorityQueue<EmbeddedScheduledTask>(ascending: true)
 
-    public var inEventLoop: Bool {
-        return true
+  public var inEventLoop: Bool {
+    return true
+  }
+
+  public init() {}
+
+  @discardableResult
+  public func scheduleTask<T>(in: TimeAmount, _ task: @escaping () throws -> T) -> Scheduled<T> {
+    let promise: EventLoopPromise<T> = makePromise()
+    let readyTime = now + UInt64(`in`.nanoseconds)
+    let task = EmbeddedScheduledTask(readyTime: readyTime) {
+      do {
+        promise.succeed(result: try task())
+      }
+      catch let err {
+        promise.fail(error: err)
+      }
     }
 
-    public init() { }
+    let scheduled = Scheduled(
+      promise: promise,
+      cancellationTask: {
+        self.scheduledTasks.remove(task)
+      })
+    scheduledTasks.push(task)
+    return scheduled
+  }
 
-    @discardableResult
-    public func scheduleTask<T>(in: TimeAmount, _ task: @escaping () throws -> T) -> Scheduled<T> {
-        let promise: EventLoopPromise<T> = makePromise()
-        let readyTime = now + UInt64(`in`.nanoseconds)
-        let task = EmbeddedScheduledTask(readyTime: readyTime) {
-            do {
-                promise.succeed(result: try task())
-            } catch let err {
-                promise.fail(error: err)
-            }
-        }
+  // We're not really running a loop here. Tasks aren't run until run() is called,
+  // at which point we run everything that's been submitted. Anything newly submitted
+  // either gets on that train if it's still moving or waits until the next call to run().
+  public func execute(_ task: @escaping () -> Void) {
+    self.scheduleTask(in: .nanoseconds(0), task)
+  }
 
-        let scheduled = Scheduled(promise: promise, cancellationTask: {
-            self.scheduledTasks.remove(task)
-        })
-        scheduledTasks.push(task)
-        return scheduled
+  public func run() {
+    // Execute all tasks that are currently enqueued to be executed *now*.
+    self.advanceTime(by: .nanoseconds(0))
+  }
+
+  /// Runs the event loop and moves "time" forward by the given amount, running any scheduled
+  /// tasks that need to be run.
+  public func advanceTime(by: TimeAmount) {
+    let newTime = self.now + UInt64(by.nanoseconds)
+
+    while let nextTask = self.scheduledTasks.peek() {
+      guard nextTask.readyTime <= newTime else {
+        break
+      }
+
+      // Now we want to grab all tasks that are ready to execute at the same
+      // time as the first.
+      var tasks = [EmbeddedScheduledTask]()
+      while let candidateTask = self.scheduledTasks.peek(),
+        candidateTask.readyTime == nextTask.readyTime
+      {
+        tasks.append(candidateTask)
+        self.scheduledTasks.pop()
+      }
+
+      // Set the time correctly before we call into user code, then
+      // call in for all tasks.
+      self.now = nextTask.readyTime
+
+      for task in tasks {
+        task.task()
+      }
     }
 
-    // We're not really running a loop here. Tasks aren't run until run() is called,
-    // at which point we run everything that's been submitted. Anything newly submitted
-    // either gets on that train if it's still moving or waits until the next call to run().
-    public func execute(_ task: @escaping () -> Void) {
-        self.scheduleTask(in: .nanoseconds(0), task)
+    // Finally ensure we got the time right.
+    self.now = newTime
+  }
+
+  func close() throws {
+    // Nothing to do here
+  }
+
+  public func shutdownGracefully(queue: DispatchQueue, _ callback: @escaping (Error?) -> Void) {
+    run()
+    queue.sync {
+      callback(nil)
     }
+  }
 
-    public func run() {
-        // Execute all tasks that are currently enqueued to be executed *now*.
-        self.advanceTime(by: .nanoseconds(0))
-    }
-
-    /// Runs the event loop and moves "time" forward by the given amount, running any scheduled
-    /// tasks that need to be run.
-    public func advanceTime(by: TimeAmount) {
-        let newTime = self.now + UInt64(by.nanoseconds)
-
-        while let nextTask = self.scheduledTasks.peek() {
-            guard nextTask.readyTime <= newTime else {
-                break
-            }
-
-            // Now we want to grab all tasks that are ready to execute at the same
-            // time as the first.
-            var tasks = Array<EmbeddedScheduledTask>()
-            while let candidateTask = self.scheduledTasks.peek(), candidateTask.readyTime == nextTask.readyTime {
-                tasks.append(candidateTask)
-                self.scheduledTasks.pop()
-            }
-
-            // Set the time correctly before we call into user code, then
-            // call in for all tasks.
-            self.now = nextTask.readyTime
-
-            for task in tasks {
-                task.task()
-            }
-        }
-
-        // Finally ensure we got the time right.
-        self.now = newTime
-    }
-
-    func close() throws {
-        // Nothing to do here
-    }
-
-    public func shutdownGracefully(queue: DispatchQueue, _ callback: @escaping (Error?) -> Void) {
-        run()
-        queue.sync {
-            callback(nil)
-        }
-    }
-
-    deinit {
-        precondition(scheduledTasks.isEmpty, "Embedded event loop freed with unexecuted scheduled tasks!")
-    }
+  deinit {
+    precondition(
+      scheduledTasks.isEmpty,
+      "Embedded event loop freed with unexecuted scheduled tasks!")
+  }
 }
 
 class EmbeddedChannelCore: ChannelCore {
-    var isOpen: Bool = true
-    var isActive: Bool = false
+  var isOpen: Bool = true
+  var isActive: Bool = false
 
-    var eventLoop: EventLoop
-    var closePromise: EventLoopPromise<Void>
-    var error: Error?
+  var eventLoop: EventLoop
+  var closePromise: EventLoopPromise<Void>
+  var error: Error?
 
-    private let pipeline: ChannelPipeline
+  private let pipeline: ChannelPipeline
 
-    init(pipeline: ChannelPipeline, eventLoop: EventLoop) {
-        closePromise = eventLoop.makePromise()
-        self.pipeline = pipeline
-        self.eventLoop = eventLoop
+  init(pipeline: ChannelPipeline, eventLoop: EventLoop) {
+    closePromise = eventLoop.makePromise()
+    self.pipeline = pipeline
+    self.eventLoop = eventLoop
+  }
+
+  deinit {
+    assert(
+      self.pipeline.destroyed,
+      "leaked an open EmbeddedChannel, maybe forgot to call channel.finish()?")
+    isOpen = false
+    closePromise.succeed(result: ())
+  }
+
+  /// Contains the flushed items that went into the `Channel` (and on a regular channel would have hit the network).
+  var outboundBuffer: [IOData] = []
+
+  /// Contains the unflushed items that went into the `Channel`
+  var pendingOutboundBuffer: [(IOData, EventLoopPromise<Void>?)] = []
+
+  /// Contains the items that travelled the `ChannelPipeline` all the way and hit the tail channel handler. On a
+  /// regular `Channel` these items would be lost.
+  var inboundBuffer: [NIOAny] = []
+
+  func localAddress0() throws -> SocketAddress {
+    throw ChannelError.operationUnsupported
+  }
+
+  func remoteAddress0() throws -> SocketAddress {
+    throw ChannelError.operationUnsupported
+  }
+
+  func close0(error: Error, mode: CloseMode, promise: EventLoopPromise<Void>?) {
+    guard self.isOpen else {
+      promise?.fail(error: ChannelError.alreadyClosed)
+      return
+    }
+    isOpen = false
+    isActive = false
+    promise?.succeed(result: ())
+
+    // As we called register() in the constructor of EmbeddedChannel we also need to ensure we call unregistered here.
+    pipeline.fireChannelInactive0()
+    pipeline.fireChannelUnregistered0()
+
+    eventLoop.execute {
+      // ensure this is executed in a delayed fashion as the users code may still traverse the pipeline
+      self.pipeline.removeHandlers()
+      self.closePromise.succeed(result: ())
+    }
+  }
+
+  func bind0(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
+    promise?.succeed(result: ())
+  }
+
+  func connect0(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
+    isActive = true
+    promise?.succeed(result: ())
+    pipeline.fireChannelActive0()
+  }
+
+  func register0(promise: EventLoopPromise<Void>?) {
+    promise?.succeed(result: ())
+    pipeline.fireChannelRegistered0()
+  }
+
+  func registerAlreadyConfigured0(promise: EventLoopPromise<Void>?) {
+    isActive = true
+    register0(promise: promise)
+    pipeline.fireChannelActive0()
+  }
+
+  func write0(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
+    guard let data = data.tryAsIOData() else {
+      promise?.fail(error: ChannelError.writeDataUnsupported)
+      return
     }
 
-    deinit {
-        assert(self.pipeline.destroyed, "leaked an open EmbeddedChannel, maybe forgot to call channel.finish()?")
-        isOpen = false
-        closePromise.succeed(result: ())
+    self.pendingOutboundBuffer.append((data, promise))
+  }
+
+  func flush0() {
+    let pendings = self.pendingOutboundBuffer
+    self.pendingOutboundBuffer.removeAll()
+    for dataAndPromise in pendings {
+      self.addToBuffer(buffer: &self.outboundBuffer, data: dataAndPromise.0)
+      dataAndPromise.1?.succeed(result: ())
     }
+  }
 
-    /// Contains the flushed items that went into the `Channel` (and on a regular channel would have hit the network).
-    var outboundBuffer: [IOData] = []
+  func read0() {
+    // NOOP
+  }
 
-    /// Contains the unflushed items that went into the `Channel`
-    var pendingOutboundBuffer: [(IOData, EventLoopPromise<Void>?)] = []
+  public final func triggerUserOutboundEvent0(_ event: Any, promise: EventLoopPromise<Void>?) {
+    promise?.succeed(result: ())
+  }
 
-    /// Contains the items that travelled the `ChannelPipeline` all the way and hit the tail channel handler. On a
-    /// regular `Channel` these items would be lost.
-    var inboundBuffer: [NIOAny] = []
+  func channelRead0(_ data: NIOAny) {
+    addToBuffer(buffer: &inboundBuffer, data: data)
+  }
 
-    func localAddress0() throws -> SocketAddress {
-        throw ChannelError.operationUnsupported
+  public func errorCaught0(error: Error) {
+    if self.error == nil {
+      self.error = error
     }
+  }
 
-    func remoteAddress0() throws -> SocketAddress {
-        throw ChannelError.operationUnsupported
-    }
-
-    func close0(error: Error, mode: CloseMode, promise: EventLoopPromise<Void>?) {
-        guard self.isOpen else {
-            promise?.fail(error: ChannelError.alreadyClosed)
-            return
-        }
-        isOpen = false
-        isActive = false
-        promise?.succeed(result: ())
-
-        // As we called register() in the constructor of EmbeddedChannel we also need to ensure we call unregistered here.
-        pipeline.fireChannelInactive0()
-        pipeline.fireChannelUnregistered0()
-
-        eventLoop.execute {
-            // ensure this is executed in a delayed fashion as the users code may still traverse the pipeline
-            self.pipeline.removeHandlers()
-            self.closePromise.succeed(result: ())
-        }
-    }
-
-    func bind0(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        promise?.succeed(result: ())
-    }
-
-    func connect0(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        isActive = true
-        promise?.succeed(result: ())
-        pipeline.fireChannelActive0()
-    }
-
-    func register0(promise: EventLoopPromise<Void>?) {
-        promise?.succeed(result: ())
-        pipeline.fireChannelRegistered0()
-    }
-
-    func registerAlreadyConfigured0(promise: EventLoopPromise<Void>?) {
-        isActive = true
-        register0(promise: promise)
-        pipeline.fireChannelActive0()
-    }
-
-    func write0(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
-        guard let data = data.tryAsIOData() else {
-            promise?.fail(error: ChannelError.writeDataUnsupported)
-            return
-        }
-
-        self.pendingOutboundBuffer.append((data, promise))
-    }
-
-    func flush0() {
-        let pendings = self.pendingOutboundBuffer
-        self.pendingOutboundBuffer.removeAll()
-        for dataAndPromise in pendings {
-            self.addToBuffer(buffer: &self.outboundBuffer, data: dataAndPromise.0)
-            dataAndPromise.1?.succeed(result: ())
-        }
-    }
-
-    func read0() {
-        // NOOP
-    }
-
-    public final func triggerUserOutboundEvent0(_ event: Any, promise: EventLoopPromise<Void>?) {
-        promise?.succeed(result: ())
-    }
-
-    func channelRead0(_ data: NIOAny) {
-        addToBuffer(buffer: &inboundBuffer, data: data)
-    }
-
-    public func errorCaught0(error: Error) {
-        if self.error == nil {
-            self.error = error
-        }
-    }
-
-    private func addToBuffer<T>(buffer: inout [T], data: T) {
-        buffer.append(data)
-    }
+  private func addToBuffer<T>(buffer: inout [T], data: T) {
+    buffer.append(data)
+  }
 }
 
 /// `EmbeddedChannel` is a `Channel` implementation that does neither any
@@ -291,117 +300,122 @@ class EmbeddedChannelCore: ChannelCore {
 ///     `EmbeddedChannel` uses an `EmbeddedEventLoop` as its `EventLoop`.
 public class EmbeddedChannel: Channel {
 
-    public var isActive: Bool { return channelcore.isActive }
-    public var closeFuture: EventLoopFuture<Void> { return channelcore.closePromise.futureResult }
+  public var isActive: Bool { return channelcore.isActive }
+  public var closeFuture: EventLoopFuture<Void> { return channelcore.closePromise.futureResult }
 
-    private lazy var channelcore: EmbeddedChannelCore = EmbeddedChannelCore(pipeline: self._pipeline, eventLoop: self.eventLoop)
+  private lazy var channelcore: EmbeddedChannelCore = EmbeddedChannelCore(
+    pipeline: self._pipeline,
+    eventLoop: self.eventLoop)
 
-    public var _unsafe: ChannelCore {
-        return channelcore
+  public var _unsafe: ChannelCore {
+    return channelcore
+  }
+
+  public var pipeline: ChannelPipeline {
+    return _pipeline
+  }
+
+  public var isWritable: Bool {
+    return true
+  }
+
+  public func finish() throws -> Bool {
+    try close().wait()
+    (self.eventLoop as! EmbeddedEventLoop).run()
+    try throwIfErrorCaught()
+    return
+      !channelcore.outboundBuffer.isEmpty || !channelcore.inboundBuffer.isEmpty ||
+      !channelcore.pendingOutboundBuffer.isEmpty
+  }
+
+  private var _pipeline: ChannelPipeline!
+  public var allocator: ByteBufferAllocator = ByteBufferAllocator()
+  public var eventLoop: EventLoop = EmbeddedEventLoop()
+
+  public let localAddress: SocketAddress? = nil
+  public let remoteAddress: SocketAddress? = nil
+
+  // Embedded channels never have parents.
+  public let parent: Channel? = nil
+
+  public func readOutbound() -> IOData? {
+    return readFromBuffer(buffer: &channelcore.outboundBuffer)
+  }
+
+  public func readInbound<T>() -> T? {
+    return readFromBuffer(buffer: &channelcore.inboundBuffer)
+  }
+
+  /// Writes `data` into the `EmbeddedChannel`'s pipeline. This will result in a `channelRead` and a
+  /// `channelReadComplete` event for the first `ChannelHandler`.
+  ///
+  /// - parameters:
+  ///    - data: The data to fire through the pipeline.
+  /// - returns: If the `inboundBuffer` now contains items. The `inboundBuffer` will be empty until some item
+  ///            travels the `ChannelPipeline` all the way and hits the tail channel handler.
+  @discardableResult public func writeInbound<T>(_ data: T) throws -> Bool {
+    pipeline.fireChannelRead(NIOAny(data))
+    pipeline.fireChannelReadComplete()
+    try throwIfErrorCaught()
+    return !channelcore.inboundBuffer.isEmpty
+  }
+
+  @discardableResult public func writeOutbound<T>(_ data: T) throws -> Bool {
+    try writeAndFlush(NIOAny(data)).wait()
+    return !channelcore.outboundBuffer.isEmpty
+  }
+
+  public func throwIfErrorCaught() throws {
+    if let error = channelcore.error {
+      channelcore.error = nil
+      throw error
+    }
+  }
+
+  private func readFromBuffer(buffer: inout [IOData]) -> IOData? {
+    if buffer.isEmpty {
+      return nil
+    }
+    return buffer.removeFirst()
+  }
+
+  private func readFromBuffer<T>(buffer: inout [NIOAny]) -> T? {
+    if buffer.isEmpty {
+      return nil
+    }
+    return (buffer.removeFirst().forceAs(type: T.self))
+  }
+
+  /// Create a new instance.
+  ///
+  /// During creation it will automatically also register itself on the `EmbeddedEventLoop`.
+  ///
+  /// - parameters:
+  ///     - handler: The `ChannelHandler` to add to the `ChannelPipeline` before register or `nil` if none should be added.
+  ///     - loop: The `EmbeddedEventLoop` to use.
+  public init(handler: ChannelHandler? = nil, loop: EmbeddedEventLoop = EmbeddedEventLoop()) {
+    self.eventLoop = loop
+    self._pipeline = ChannelPipeline(channel: self)
+
+    if let handler = handler {
+      // This will be propagated via fireErrorCaught
+      _ = try? _pipeline.add(handler: handler).wait()
     }
 
-    public var pipeline: ChannelPipeline {
-        return _pipeline
+    // This will never throw...
+    try! register().wait()
+  }
+
+  public func setOption<T>(option: T, value: T.OptionType) -> EventLoopFuture<Void>
+  where T: ChannelOption {
+    // No options supported
+    fatalError("no options supported")
+  }
+
+  public func getOption<T>(option: T) -> EventLoopFuture<T.OptionType> where T: ChannelOption {
+    if option is AutoReadOption {
+      return self.eventLoop.makeSucceededFuture(result: true as! T.OptionType)
     }
-
-    public var isWritable: Bool {
-        return true
-    }
-
-    public func finish() throws -> Bool {
-        try close().wait()
-        (self.eventLoop as! EmbeddedEventLoop).run()
-        try throwIfErrorCaught()
-        return !channelcore.outboundBuffer.isEmpty || !channelcore.inboundBuffer.isEmpty || !channelcore.pendingOutboundBuffer.isEmpty
-    }
-
-    private var _pipeline: ChannelPipeline!
-    public var allocator: ByteBufferAllocator = ByteBufferAllocator()
-    public var eventLoop: EventLoop = EmbeddedEventLoop()
-
-    public let localAddress: SocketAddress? = nil
-    public let remoteAddress: SocketAddress? = nil
-
-    // Embedded channels never have parents.
-    public let parent: Channel? = nil
-
-    public func readOutbound() -> IOData? {
-        return readFromBuffer(buffer: &channelcore.outboundBuffer)
-    }
-
-    public func readInbound<T>() -> T? {
-        return readFromBuffer(buffer: &channelcore.inboundBuffer)
-    }
-
-    /// Writes `data` into the `EmbeddedChannel`'s pipeline. This will result in a `channelRead` and a
-    /// `channelReadComplete` event for the first `ChannelHandler`.
-    ///
-    /// - parameters:
-    ///    - data: The data to fire through the pipeline.
-    /// - returns: If the `inboundBuffer` now contains items. The `inboundBuffer` will be empty until some item
-    ///            travels the `ChannelPipeline` all the way and hits the tail channel handler.
-    @discardableResult public func writeInbound<T>(_ data: T) throws -> Bool {
-        pipeline.fireChannelRead(NIOAny(data))
-        pipeline.fireChannelReadComplete()
-        try throwIfErrorCaught()
-        return !channelcore.inboundBuffer.isEmpty
-    }
-
-    @discardableResult public func writeOutbound<T>(_ data: T) throws -> Bool {
-        try writeAndFlush(NIOAny(data)).wait()
-        return !channelcore.outboundBuffer.isEmpty
-    }
-
-    public func throwIfErrorCaught() throws {
-        if let error = channelcore.error {
-            channelcore.error = nil
-            throw error
-        }
-    }
-
-    private func readFromBuffer(buffer: inout [IOData]) -> IOData? {
-        if buffer.isEmpty {
-            return nil
-        }
-        return buffer.removeFirst()
-    }
-
-    private func readFromBuffer<T>(buffer: inout [NIOAny]) -> T? {
-        if buffer.isEmpty {
-            return nil
-        }
-        return (buffer.removeFirst().forceAs(type: T.self))
-    }
-
-    /// Create a new instance.
-    ///
-    /// During creation it will automatically also register itself on the `EmbeddedEventLoop`.
-    ///
-    /// - parameters:
-    ///     - handler: The `ChannelHandler` to add to the `ChannelPipeline` before register or `nil` if none should be added.
-    ///     - loop: The `EmbeddedEventLoop` to use.
-    public init(handler: ChannelHandler? = nil, loop: EmbeddedEventLoop = EmbeddedEventLoop()) {
-        self.eventLoop = loop
-        self._pipeline = ChannelPipeline(channel: self)
-
-        if let handler = handler {
-            // This will be propagated via fireErrorCaught
-            _ = try? _pipeline.add(handler: handler).wait()
-        }
-
-        // This will never throw...
-        try! register().wait()
-    }
-
-    public func setOption<T>(option: T, value: T.OptionType) -> EventLoopFuture<Void> where T: ChannelOption {
-        // No options supported
-        fatalError("no options supported")
-    }
-
-    public func getOption<T>(option: T) -> EventLoopFuture<T.OptionType> where T: ChannelOption {
-        if option is AutoReadOption {
-            return self.eventLoop.makeSucceededFuture(result: true as! T.OptionType)
-        }
-        fatalError("option \(option) not supported")
-    }
+    fatalError("option \(option) not supported")
+  }
 }

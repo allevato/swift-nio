@@ -43,213 +43,213 @@
 ///         }
 ///     }
 public struct NIOAny {
-    @usableFromInline
-    /* private but _versioned */ let _storage: _NIOAny
+  @usableFromInline
+  // private but _versioned
+  let _storage: _NIOAny
 
-    /// Wrap a value in a `NIOAny`. In most cases you should not create a `NIOAny` directly using this constructor.
-    /// The abstraction that accepts values of type `NIOAny` must also provide a mechanism to do the wrapping. An
-    /// example is a `ChannelInboundHandler` which provides `self.wrapInboundOut(aValueOfTypeInboundOut)`.
-    @inlinable
-    public init<T>(_ value: T) {
-        self._storage = _NIOAny(value)
+  /// Wrap a value in a `NIOAny`. In most cases you should not create a `NIOAny` directly using this constructor.
+  /// The abstraction that accepts values of type `NIOAny` must also provide a mechanism to do the wrapping. An
+  /// example is a `ChannelInboundHandler` which provides `self.wrapInboundOut(aValueOfTypeInboundOut)`.
+  @inlinable public init<T>(_ value: T) {
+    self._storage = _NIOAny(value)
+  }
+
+  @usableFromInline enum _NIOAny {
+    case ioData(IOData)
+    case bufferEnvelope(AddressedEnvelope<ByteBuffer>)
+    case other(Any)
+
+    @inlinable init<T>(_ value: T) {
+      switch value {
+      case let value as ByteBuffer:
+        self = .ioData(.byteBuffer(value))
+      case let value as FileRegion:
+        self = .ioData(.fileRegion(value))
+      case let value as IOData:
+        self = .ioData(value)
+      case let value as AddressedEnvelope<ByteBuffer>:
+        self = .bufferEnvelope(value)
+      default:
+        assert(!(value is NIOAny))
+        self = .other(value)
+      }
     }
+  }
 
-    @usableFromInline
-    enum _NIOAny {
-        case ioData(IOData)
-        case bufferEnvelope(AddressedEnvelope<ByteBuffer>)
-        case other(Any)
-
-        @inlinable
-        init<T>(_ value: T) {
-            switch value {
-            case let value as ByteBuffer:
-                self = .ioData(.byteBuffer(value))
-            case let value as FileRegion:
-                self = .ioData(.fileRegion(value))
-            case let value as IOData:
-                self = .ioData(value)
-            case let value as AddressedEnvelope<ByteBuffer>:
-                self = .bufferEnvelope(value)
-            default:
-                assert(!(value is NIOAny))
-                self = .other(value)
-            }
-        }
+  /// Try unwrapping the wrapped message as `ByteBuffer`.
+  ///
+  /// returns: The wrapped `ByteBuffer` or `nil` if the wrapped message is not a `ByteBuffer`.
+  @inlinable func tryAsByteBuffer() -> ByteBuffer? {
+    if case .ioData(.byteBuffer(let bb)) = self._storage {
+      return bb
     }
-
-    /// Try unwrapping the wrapped message as `ByteBuffer`.
-    ///
-    /// returns: The wrapped `ByteBuffer` or `nil` if the wrapped message is not a `ByteBuffer`.
-    @inlinable
-    func tryAsByteBuffer() -> ByteBuffer? {
-        if case .ioData(.byteBuffer(let bb)) = self._storage {
-            return bb
-        } else {
-            return nil
-        }
+    else {
+      return nil
     }
+  }
 
-    /// Force unwrapping the wrapped message as `ByteBuffer`.
-    ///
-    /// returns: The wrapped `ByteBuffer` or crash if the wrapped message is not a `ByteBuffer`.
-    @inlinable
-    func forceAsByteBuffer() -> ByteBuffer {
-        if let v = tryAsByteBuffer() {
-            return v
-        } else {
-            fatalError("tried to decode as type \(ByteBuffer.self) but found \(Mirror(reflecting: Mirror(reflecting: self._storage).children.first!.value).subjectType)")
-        }
+  /// Force unwrapping the wrapped message as `ByteBuffer`.
+  ///
+  /// returns: The wrapped `ByteBuffer` or crash if the wrapped message is not a `ByteBuffer`.
+  @inlinable func forceAsByteBuffer() -> ByteBuffer {
+    if let v = tryAsByteBuffer() {
+      return v
     }
+    else {
+      fatalError(
+        "tried to decode as type \(ByteBuffer.self) but found \(Mirror(reflecting: Mirror(reflecting: self._storage).children.first!.value).subjectType)")
+    }
+  }
 
-    /// Try unwrapping the wrapped message as `IOData`.
-    ///
-    /// returns: The wrapped `IOData` or `nil` if the wrapped message is not a `IOData`.
-    @inlinable
-    func tryAsIOData() -> IOData? {
-        if case .ioData(let data) = self._storage {
-            return data
-        } else {
-            return nil
-        }
+  /// Try unwrapping the wrapped message as `IOData`.
+  ///
+  /// returns: The wrapped `IOData` or `nil` if the wrapped message is not a `IOData`.
+  @inlinable func tryAsIOData() -> IOData? {
+    if case .ioData(let data) = self._storage {
+      return data
     }
+    else {
+      return nil
+    }
+  }
 
-    /// Force unwrapping the wrapped message as `IOData`.
-    ///
-    /// returns: The wrapped `IOData` or crash if the wrapped message is not a `IOData`.
-    @inlinable
-    func forceAsIOData() -> IOData {
-        if let v = tryAsIOData() {
-            return v
-        } else {
-            fatalError("tried to decode as type \(IOData.self) but found \(Mirror(reflecting: Mirror(reflecting: self._storage).children.first!.value).subjectType)")
-        }
+  /// Force unwrapping the wrapped message as `IOData`.
+  ///
+  /// returns: The wrapped `IOData` or crash if the wrapped message is not a `IOData`.
+  @inlinable func forceAsIOData() -> IOData {
+    if let v = tryAsIOData() {
+      return v
     }
+    else {
+      fatalError(
+        "tried to decode as type \(IOData.self) but found \(Mirror(reflecting: Mirror(reflecting: self._storage).children.first!.value).subjectType)")
+    }
+  }
 
-    /// Try unwrapping the wrapped message as `FileRegion`.
-    ///
-    /// returns: The wrapped `FileRegion` or `nil` if the wrapped message is not a `FileRegion`.
-    @inlinable
-    func tryAsFileRegion() -> FileRegion? {
-        if case .ioData(.fileRegion(let f)) = self._storage {
-            return f
-        } else {
-            return nil
-        }
+  /// Try unwrapping the wrapped message as `FileRegion`.
+  ///
+  /// returns: The wrapped `FileRegion` or `nil` if the wrapped message is not a `FileRegion`.
+  @inlinable func tryAsFileRegion() -> FileRegion? {
+    if case .ioData(.fileRegion(let f)) = self._storage {
+      return f
     }
+    else {
+      return nil
+    }
+  }
 
-    /// Force unwrapping the wrapped message as `FileRegion`.
-    ///
-    /// returns: The wrapped `FileRegion` or crash if the wrapped message is not a `FileRegion`.
-    @inlinable
-    func forceAsFileRegion() -> FileRegion {
-        if let v = tryAsFileRegion() {
-            return v
-        } else {
-            fatalError("tried to decode as type \(FileRegion.self) but found \(Mirror(reflecting: Mirror(reflecting: self._storage).children.first!.value).subjectType)")
-        }
+  /// Force unwrapping the wrapped message as `FileRegion`.
+  ///
+  /// returns: The wrapped `FileRegion` or crash if the wrapped message is not a `FileRegion`.
+  @inlinable func forceAsFileRegion() -> FileRegion {
+    if let v = tryAsFileRegion() {
+      return v
     }
+    else {
+      fatalError(
+        "tried to decode as type \(FileRegion.self) but found \(Mirror(reflecting: Mirror(reflecting: self._storage).children.first!.value).subjectType)")
+    }
+  }
 
-    /// Try unwrapping the wrapped message as `AddressedEnvelope<ByteBuffer>`.
-    ///
-    /// returns: The wrapped `AddressedEnvelope<ByteBuffer>` or `nil` if the wrapped message is not an `AddressedEnvelope<ByteBuffer>`.
-    @inlinable
-    func tryAsByteEnvelope() -> AddressedEnvelope<ByteBuffer>? {
-        if case .bufferEnvelope(let e) = self._storage {
-            return e
-        } else {
-            return nil
-        }
+  /// Try unwrapping the wrapped message as `AddressedEnvelope<ByteBuffer>`.
+  ///
+  /// returns: The wrapped `AddressedEnvelope<ByteBuffer>` or `nil` if the wrapped message is not an `AddressedEnvelope<ByteBuffer>`.
+  @inlinable func tryAsByteEnvelope() -> AddressedEnvelope<ByteBuffer>? {
+    if case .bufferEnvelope(let e) = self._storage {
+      return e
     }
+    else {
+      return nil
+    }
+  }
 
-    /// Force unwrapping the wrapped message as `AddressedEnvelope<ByteBuffer>`.
-    ///
-    /// returns: The wrapped `AddressedEnvelope<ByteBuffer>` or crash if the wrapped message is not an `AddressedEnvelope<ByteBuffer>`.
-    @inlinable
-    func forceAsByteEnvelope() -> AddressedEnvelope<ByteBuffer> {
-        if let e = tryAsByteEnvelope() {
-            return e
-        } else {
-            fatalError("tried to decode as type \(AddressedEnvelope<ByteBuffer>.self) but found \(Mirror(reflecting: Mirror(reflecting: self._storage).children.first!.value).subjectType)")
-        }
+  /// Force unwrapping the wrapped message as `AddressedEnvelope<ByteBuffer>`.
+  ///
+  /// returns: The wrapped `AddressedEnvelope<ByteBuffer>` or crash if the wrapped message is not an `AddressedEnvelope<ByteBuffer>`.
+  @inlinable func forceAsByteEnvelope() -> AddressedEnvelope<ByteBuffer> {
+    if let e = tryAsByteEnvelope() {
+      return e
     }
+    else {
+      fatalError(
+        "tried to decode as type \(AddressedEnvelope<ByteBuffer>.self) but found \(Mirror(reflecting: Mirror(reflecting: self._storage).children.first!.value).subjectType)")
+    }
+  }
 
-    /// Try unwrapping the wrapped message as `T`.
-    ///
-    /// returns: The wrapped `T` or `nil` if the wrapped message is not a `T`.
-    @inlinable
-    func tryAsOther<T>(type: T.Type = T.self) -> T? {
-        if case .other(let any) = self._storage {
-            return any as? T
-        } else {
-            return nil
-        }
+  /// Try unwrapping the wrapped message as `T`.
+  ///
+  /// returns: The wrapped `T` or `nil` if the wrapped message is not a `T`.
+  @inlinable func tryAsOther<T>(type: T.Type = T.self) -> T? {
+    if case .other(let any) = self._storage {
+      return any as? T
     }
+    else {
+      return nil
+    }
+  }
 
-    /// Force unwrapping the wrapped message as `T`.
-    ///
-    /// returns: The wrapped `T` or crash if the wrapped message is not a `T`.
-    @inlinable
-    func forceAsOther<T>(type: T.Type = T.self) -> T {
-        if let v = tryAsOther(type: type) {
-            return v
-        } else {
-            fatalError("tried to decode as type \(T.self) but found \(Mirror(reflecting: Mirror(reflecting: self._storage).children.first!.value).subjectType)")
-        }
+  /// Force unwrapping the wrapped message as `T`.
+  ///
+  /// returns: The wrapped `T` or crash if the wrapped message is not a `T`.
+  @inlinable func forceAsOther<T>(type: T.Type = T.self) -> T {
+    if let v = tryAsOther(type: type) {
+      return v
     }
+    else {
+      fatalError(
+        "tried to decode as type \(T.self) but found \(Mirror(reflecting: Mirror(reflecting: self._storage).children.first!.value).subjectType)")
+    }
+  }
 
-    /// Force unwrapping the wrapped message as `T`.
-    ///
-    /// returns: The wrapped `T` or crash if the wrapped message is not a `T`.
-    @inlinable
-    func forceAs<T>(type: T.Type = T.self) -> T {
-        switch T.self {
-        case let t where t == ByteBuffer.self:
-            return self.forceAsByteBuffer() as! T
-        case let t where t == FileRegion.self:
-            return self.forceAsFileRegion() as! T
-        case let t where t == IOData.self:
-            return self.forceAsIOData() as! T
-        case let t where t == AddressedEnvelope<ByteBuffer>.self:
-            return self.forceAsByteEnvelope() as! T
-        default:
-            return self.forceAsOther(type: type)
-        }
+  /// Force unwrapping the wrapped message as `T`.
+  ///
+  /// returns: The wrapped `T` or crash if the wrapped message is not a `T`.
+  @inlinable func forceAs<T>(type: T.Type = T.self) -> T {
+    switch T.self {
+    case let t where t == ByteBuffer.self:
+      return self.forceAsByteBuffer() as! T
+    case let t where t == FileRegion.self:
+      return self.forceAsFileRegion() as! T
+    case let t where t == IOData.self:
+      return self.forceAsIOData() as! T
+    case let t where t == AddressedEnvelope<ByteBuffer>.self:
+      return self.forceAsByteEnvelope() as! T
+    default:
+      return self.forceAsOther(type: type)
     }
+  }
 
-    /// Try unwrapping the wrapped message as `T`.
-    ///
-    /// returns: The wrapped `T` or `nil` if the wrapped message is not a `T`.
-    @inlinable
-    func tryAs<T>(type: T.Type = T.self) -> T? {
-        switch T.self {
-        case let t where t == ByteBuffer.self:
-            return self.tryAsByteBuffer() as! T?
-        case let t where t == FileRegion.self:
-            return self.tryAsFileRegion() as! T?
-        case let t where t == IOData.self:
-            return self.tryAsIOData() as! T?
-        case let t where t == AddressedEnvelope<ByteBuffer>.self:
-            return self.tryAsByteEnvelope() as! T?
-        default:
-            return self.tryAsOther(type: type)
-        }
+  /// Try unwrapping the wrapped message as `T`.
+  ///
+  /// returns: The wrapped `T` or `nil` if the wrapped message is not a `T`.
+  @inlinable func tryAs<T>(type: T.Type = T.self) -> T? {
+    switch T.self {
+    case let t where t == ByteBuffer.self:
+      return self.tryAsByteBuffer() as! T?
+    case let t where t == FileRegion.self:
+      return self.tryAsFileRegion() as! T?
+    case let t where t == IOData.self:
+      return self.tryAsIOData() as! T?
+    case let t where t == AddressedEnvelope<ByteBuffer>.self:
+      return self.tryAsByteEnvelope() as! T?
+    default:
+      return self.tryAsOther(type: type)
     }
+  }
 
-    /// Unwrap the wrapped message.
-    ///
-    /// returns: The wrapped message.
-    @inlinable
-    func asAny() -> Any {
-        switch self._storage {
-        case .ioData(.byteBuffer(let bb)):
-            return bb
-        case .ioData(.fileRegion(let f)):
-            return f
-        case .bufferEnvelope(let e):
-            return e
-        case .other(let o):
-            return o
-        }
+  /// Unwrap the wrapped message.
+  ///
+  /// returns: The wrapped message.
+  @inlinable func asAny() -> Any {
+    switch self._storage {
+    case .ioData(.byteBuffer(let bb)):
+      return bb
+    case .ioData(.fileRegion(let f)):
+      return f
+    case .bufferEnvelope(let e):
+      return e
+    case .other(let o):
+      return o
     }
+  }
 }

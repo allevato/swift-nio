@@ -134,904 +134,1003 @@
 ///
 /// A `ChannelHandler` can be added or removed at any time because a `ChannelPipeline` is thread safe.
 public final class ChannelPipeline: ChannelInvoker {
-    private var head: ChannelHandlerContext?
-    private var tail: ChannelHandlerContext?
+  private var head: ChannelHandlerContext?
+  private var tail: ChannelHandlerContext?
 
-    private var idx: Int = 0
-    internal private(set) var destroyed: Bool = false
+  private var idx: Int = 0
+  internal private(set) var destroyed: Bool = false
 
-    /// The `EventLoop` that is used by the underlying `Channel`.
-    public let eventLoop: EventLoop
+  /// The `EventLoop` that is used by the underlying `Channel`.
+  public let eventLoop: EventLoop
 
-    /// The `Channel` that this `ChannelPipeline` belongs to.
-    ///
-    /// - note: This will be nil after the channel has closed
-    private var _channel: Channel?
+  /// The `Channel` that this `ChannelPipeline` belongs to.
+  ///
+  /// - note: This will be nil after the channel has closed
+  private var _channel: Channel?
 
-    /// The `Channel` that this `ChannelPipeline` belongs to.
-    internal var channel: Channel {
-        self.eventLoop.assertInEventLoop()
-        assert(self._channel != nil || self.destroyed)
-        return self._channel ?? DeadChannel(pipeline: self)
+  /// The `Channel` that this `ChannelPipeline` belongs to.
+  internal var channel: Channel {
+    self.eventLoop.assertInEventLoop()
+    assert(self._channel != nil || self.destroyed)
+    return self._channel ?? DeadChannel(pipeline: self)
+  }
+
+  /// Add a `ChannelHandler` to the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - name: the name to use for the `ChannelHandler` when its added. If none is specified it will generate a name.
+  ///     - handler: the `ChannelHandler` to add
+  ///     - first: `true` to add this handler to the front of the `ChannelPipeline`, `false to add it last
+  /// - returns: the `EventLoopFuture` which will be notified once the `ChannelHandler` was added.
+  public func add(name: String? = nil, handler: ChannelHandler, first: Bool = false)
+  -> EventLoopFuture<Void> {
+    let promise = self.eventLoop.makePromise(of: Void.self)
+
+    func _add() {
+      if self.destroyed {
+        promise.fail(error: ChannelError.ioOnClosedChannel)
+        return
+      }
+
+      if first {
+        self.add0(
+          name: name,
+          handler: handler,
+          relativeContext: head!,
+          operation: self.add0(context:after:),
+          promise: promise)
+      }
+      else {
+        self.add0(
+          name: name,
+          handler: handler,
+          relativeContext: tail!,
+          operation: self.add0(context:before:),
+          promise: promise)
+      }
     }
 
-    /// Add a `ChannelHandler` to the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - name: the name to use for the `ChannelHandler` when its added. If none is specified it will generate a name.
-    ///     - handler: the `ChannelHandler` to add
-    ///     - first: `true` to add this handler to the front of the `ChannelPipeline`, `false to add it last
-    /// - returns: the `EventLoopFuture` which will be notified once the `ChannelHandler` was added.
-    public func add(name: String? = nil, handler: ChannelHandler, first: Bool = false) -> EventLoopFuture<Void> {
-        let promise = self.eventLoop.makePromise(of: Void.self)
-
-        func _add() {
-            if self.destroyed {
-                promise.fail(error: ChannelError.ioOnClosedChannel)
-                return
-            }
-
-            if first {
-                self.add0(name: name, handler: handler, relativeContext: head!, operation: self.add0(context:after:), promise: promise)
-            } else {
-                self.add0(name: name, handler: handler, relativeContext: tail!, operation: self.add0(context:before:), promise: promise)
-            }
-        }
-
-        if self.eventLoop.inEventLoop {
-            _add()
-        } else {
-            self.eventLoop.execute {
-                _add()
-            }
-        }
-
-        return promise.futureResult
+    if self.eventLoop.inEventLoop {
+      _add()
+    }
+    else {
+      self.eventLoop.execute {
+        _add()
+      }
     }
 
-    /// Add a `ChannelHandler` to the `ChannelPipeline` immediately after a `ChannelHandler` that is already present
-    /// in the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - name: The name to use for the `ChannelHandler` when its added. If none is specified, a name will be
-    ///         automatically generated.
-    ///     - handler: The `ChannelHandler` to add.
-    ///     - after: The pre-existing `ChannelHandler` that `handler` should be inserted immediately after.
-    /// - returns: An `EventLoopFuture` that will be notified when the `ChannelHandler` is added.
-    public func add(name: String? = nil, handler: ChannelHandler, after: ChannelHandler) -> EventLoopFuture<Void> {
-        let promise = self.eventLoop.makePromise(of: Void.self)
+    return promise.futureResult
+  }
 
-        if self.eventLoop.inEventLoop {
-            self.add0(name: name, handler: handler, relativeHandler: after, operation: self.add0(context:after:), promise: promise)
-        } else {
-            self.eventLoop.execute {
-                self.add0(name: name, handler: handler, relativeHandler: after, operation: self.add0(context:after:), promise: promise)
-            }
-        }
+  /// Add a `ChannelHandler` to the `ChannelPipeline` immediately after a `ChannelHandler` that is already present
+  /// in the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - name: The name to use for the `ChannelHandler` when its added. If none is specified, a name will be
+  ///         automatically generated.
+  ///     - handler: The `ChannelHandler` to add.
+  ///     - after: The pre-existing `ChannelHandler` that `handler` should be inserted immediately after.
+  /// - returns: An `EventLoopFuture` that will be notified when the `ChannelHandler` is added.
+  public func add(name: String? = nil, handler: ChannelHandler, after: ChannelHandler)
+  -> EventLoopFuture<Void> {
+    let promise = self.eventLoop.makePromise(of: Void.self)
 
-        return promise.futureResult
+    if self.eventLoop.inEventLoop {
+      self.add0(
+        name: name,
+        handler: handler,
+        relativeHandler: after,
+        operation: self.add0(context:after:),
+        promise: promise)
+    }
+    else {
+      self.eventLoop.execute {
+        self.add0(
+          name: name,
+          handler: handler,
+          relativeHandler: after,
+          operation: self.add0(context:after:),
+          promise: promise)
+      }
     }
 
-    /// Add a `ChannelHandler` to the `ChannelPipeline` immediately before a `ChannelHandler` that is already present
-    /// in the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - name: The name to use for the `ChannelHandler` when its added. If none is specified, a name will be
-    ///         automatically generated.
-    ///     - handler: The `ChannelHandler` to add.
-    ///     - after: The pre-existing `ChannelHandler` that `handler` should be inserted immediately before.
-    /// - returns: An `EventLoopFuture` that will be notified when the `ChannelHandler` is added.
-    public func add(name: String? = nil, handler: ChannelHandler, before: ChannelHandler) -> EventLoopFuture<Void> {
-        let promise = self.eventLoop.makePromise(of: Void.self)
+    return promise.futureResult
+  }
 
-        if self.eventLoop.inEventLoop {
-            self.add0(name: name, handler: handler, relativeHandler: before, operation: self.add0(context:before:), promise: promise)
-        } else {
-            self.eventLoop.execute {
-                self.add0(name: name, handler: handler, relativeHandler: before, operation: self.add0(context:before:), promise: promise)
-            }
-        }
+  /// Add a `ChannelHandler` to the `ChannelPipeline` immediately before a `ChannelHandler` that is already present
+  /// in the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - name: The name to use for the `ChannelHandler` when its added. If none is specified, a name will be
+  ///         automatically generated.
+  ///     - handler: The `ChannelHandler` to add.
+  ///     - after: The pre-existing `ChannelHandler` that `handler` should be inserted immediately before.
+  /// - returns: An `EventLoopFuture` that will be notified when the `ChannelHandler` is added.
+  public func add(name: String? = nil, handler: ChannelHandler, before: ChannelHandler)
+  -> EventLoopFuture<Void> {
+    let promise = self.eventLoop.makePromise(of: Void.self)
 
-        return promise.futureResult
+    if self.eventLoop.inEventLoop {
+      self.add0(
+        name: name,
+        handler: handler,
+        relativeHandler: before,
+        operation: self.add0(context:before:),
+        promise: promise)
+    }
+    else {
+      self.eventLoop.execute {
+        self.add0(
+          name: name,
+          handler: handler,
+          relativeHandler: before,
+          operation: self.add0(context:before:),
+          promise: promise)
+      }
     }
 
-    /// Synchronously add a `ChannelHandler` to the pipeline, relative to another `ChannelHandler`,
-    /// where the insertion is done by a specific operation.
-    ///
-    /// May only be called from on the event loop.
-    ///
-    /// This will search the pipeline for `relativeHandler` and, if it cannot find it, will fail
-    /// `promise` with `ChannelPipelineError.notFound`.
-    ///
-    /// - parameters:
-    ///     - name: The name to use for the `ChannelHandler` when its added. If none is specified, a name will be
-    ///         automatically generated.
-    ///     - handler: The `ChannelHandler` to add.
-    ///     - relativeHandler: The `ChannelHandler` already in the `ChannelPipeline` that `handler` will be
-    ///         inserted relative to.
-    ///     - operation: A callback that will insert `handler` relative to `relativeHandler`.
-    ///     - promise: An `EventLoopPromise<Void>` that will fire when the operation is complete, or will fire with
-    ///         an error if it could not be completed.
-    private func add0(name: String?,
-                      handler: ChannelHandler,
-                      relativeHandler: ChannelHandler,
-                      operation: (ChannelHandlerContext, ChannelHandlerContext) -> Void,
-                      promise: EventLoopPromise<Void>) {
-        self.eventLoop.assertInEventLoop()
-        if self.destroyed {
-            promise.fail(error: ChannelError.ioOnClosedChannel)
-            return
-        }
+    return promise.futureResult
+  }
 
-        guard let ctx = self.contextForPredicate0({ $0.handler === relativeHandler }) else {
-            promise.fail(error: ChannelPipelineError.notFound)
-            return
-        }
-
-        self.add0(name: name, handler: handler, relativeContext: ctx, operation: operation, promise: promise)
+  /// Synchronously add a `ChannelHandler` to the pipeline, relative to another `ChannelHandler`,
+  /// where the insertion is done by a specific operation.
+  ///
+  /// May only be called from on the event loop.
+  ///
+  /// This will search the pipeline for `relativeHandler` and, if it cannot find it, will fail
+  /// `promise` with `ChannelPipelineError.notFound`.
+  ///
+  /// - parameters:
+  ///     - name: The name to use for the `ChannelHandler` when its added. If none is specified, a name will be
+  ///         automatically generated.
+  ///     - handler: The `ChannelHandler` to add.
+  ///     - relativeHandler: The `ChannelHandler` already in the `ChannelPipeline` that `handler` will be
+  ///         inserted relative to.
+  ///     - operation: A callback that will insert `handler` relative to `relativeHandler`.
+  ///     - promise: An `EventLoopPromise<Void>` that will fire when the operation is complete, or will fire with
+  ///         an error if it could not be completed.
+  private func add0(
+    name: String?,
+    handler: ChannelHandler,
+    relativeHandler: ChannelHandler,
+    operation: (ChannelHandlerContext, ChannelHandlerContext) -> Void,
+    promise: EventLoopPromise<Void>
+  ) {
+    self.eventLoop.assertInEventLoop()
+    if self.destroyed {
+      promise.fail(error: ChannelError.ioOnClosedChannel)
+      return
     }
 
-    /// Synchronously add a `ChannelHandler` to the pipeline, relative to a `ChannelHandlerContext`,
-    /// where the insertion is done by a specific operation.
-    ///
-    /// May only be called from on the event loop.
-    ///
-    /// This method is more efficient than the one that takes a `relativeHandler` as it does not need to
-    /// search the pipeline for the insertion point. It should be used whenever possible.
-    ///
-    /// - parameters:
-    ///     - name: The name to use for the `ChannelHandler` when its added. If none is specified, a name will be
-    ///         automatically generated.
-    ///     - handler: The `ChannelHandler` to add.
-    ///     - relativeContext: The `ChannelHandlerContext` already in the `ChannelPipeline` that `handler` will be
-    ///         inserted relative to.
-    ///     - operation: A callback that will insert `handler` relative to `relativeHandler`.
-    ///     - promise: An `EventLoopPromise<Void>` that will fire when the operation is complete, or will fire with
-    ///         an error if it could not be completed.
-    private func add0(name: String?,
-                      handler: ChannelHandler,
-                      relativeContext: ChannelHandlerContext,
-                      operation: (ChannelHandlerContext, ChannelHandlerContext) -> Void,
-                      promise: EventLoopPromise<Void>) {
-        self.eventLoop.assertInEventLoop()
-
-        if destroyed {
-            promise.fail(error: ChannelError.ioOnClosedChannel)
-            return
-        }
-
-        let ctx = ChannelHandlerContext(name: name ?? nextName(), handler: handler, pipeline: self)
-        operation(ctx, relativeContext)
-
-        do {
-            try ctx.invokeHandlerAdded()
-            promise.succeed(result: ())
-        } catch let err {
-            remove0(ctx: ctx, promise: nil)
-            promise.fail(error: err)
-        }
+    guard let ctx = self.contextForPredicate0({ $0.handler === relativeHandler }) else {
+      promise.fail(error: ChannelPipelineError.notFound)
+      return
     }
 
-    /// Synchronously add a single new `ChannelHandlerContext` after one that currently exists in the
-    /// pipeline.
-    ///
-    /// Must be called from within the event loop thread, as it synchronously manipulates the
-    /// `ChannelHandlerContext`s on the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - new: The `ChannelHandlerContext` to add to the pipeline.
-    ///     - existing: The `ChannelHandlerContext` that `new` will be added after.
-    private func add0(context new: ChannelHandlerContext, after existing: ChannelHandlerContext) {
-        self.eventLoop.assertInEventLoop()
+    self.add0(
+      name: name,
+      handler: handler,
+      relativeContext: ctx,
+      operation: operation,
+      promise: promise)
+  }
 
-        let next = existing.next
-        new.prev = existing
-        new.next = next
-        existing.next = new
-        next?.prev = new
+  /// Synchronously add a `ChannelHandler` to the pipeline, relative to a `ChannelHandlerContext`,
+  /// where the insertion is done by a specific operation.
+  ///
+  /// May only be called from on the event loop.
+  ///
+  /// This method is more efficient than the one that takes a `relativeHandler` as it does not need to
+  /// search the pipeline for the insertion point. It should be used whenever possible.
+  ///
+  /// - parameters:
+  ///     - name: The name to use for the `ChannelHandler` when its added. If none is specified, a name will be
+  ///         automatically generated.
+  ///     - handler: The `ChannelHandler` to add.
+  ///     - relativeContext: The `ChannelHandlerContext` already in the `ChannelPipeline` that `handler` will be
+  ///         inserted relative to.
+  ///     - operation: A callback that will insert `handler` relative to `relativeHandler`.
+  ///     - promise: An `EventLoopPromise<Void>` that will fire when the operation is complete, or will fire with
+  ///         an error if it could not be completed.
+  private func add0(
+    name: String?,
+    handler: ChannelHandler,
+    relativeContext: ChannelHandlerContext,
+    operation: (ChannelHandlerContext, ChannelHandlerContext) -> Void,
+    promise: EventLoopPromise<Void>
+  ) {
+    self.eventLoop.assertInEventLoop()
+
+    if destroyed {
+      promise.fail(error: ChannelError.ioOnClosedChannel)
+      return
     }
 
-    /// Synchronously add a single new `ChannelHandlerContext` before one that currently exists in the
-    /// pipeline.
-    ///
-    /// Must be called from within the event loop thread, as it synchronously manipulates the
-    /// `ChannelHandlerContext`s on the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - new: The `ChannelHandlerContext` to add to the pipeline.
-    ///     - existing: The `ChannelHandlerContext` that `new` will be added before.
-    private func add0(context new: ChannelHandlerContext, before existing: ChannelHandlerContext) {
-        self.eventLoop.assertInEventLoop()
+    let ctx = ChannelHandlerContext(name: name ?? nextName(), handler: handler, pipeline: self)
+    operation(ctx, relativeContext)
 
-        let prev = existing.prev
-        new.prev = prev
-        new.next = existing
-        existing.prev = new
-        prev?.next = new
+    do {
+      try ctx.invokeHandlerAdded()
+      promise.succeed(result: ())
+    }
+    catch let err {
+      remove0(ctx: ctx, promise: nil)
+      promise.fail(error: err)
+    }
+  }
+
+  /// Synchronously add a single new `ChannelHandlerContext` after one that currently exists in the
+  /// pipeline.
+  ///
+  /// Must be called from within the event loop thread, as it synchronously manipulates the
+  /// `ChannelHandlerContext`s on the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - new: The `ChannelHandlerContext` to add to the pipeline.
+  ///     - existing: The `ChannelHandlerContext` that `new` will be added after.
+  private func add0(context new: ChannelHandlerContext, after existing: ChannelHandlerContext) {
+    self.eventLoop.assertInEventLoop()
+
+    let next = existing.next
+    new.prev = existing
+    new.next = next
+    existing.next = new
+    next?.prev = new
+  }
+
+  /// Synchronously add a single new `ChannelHandlerContext` before one that currently exists in the
+  /// pipeline.
+  ///
+  /// Must be called from within the event loop thread, as it synchronously manipulates the
+  /// `ChannelHandlerContext`s on the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - new: The `ChannelHandlerContext` to add to the pipeline.
+  ///     - existing: The `ChannelHandlerContext` that `new` will be added before.
+  private func add0(context new: ChannelHandlerContext, before existing: ChannelHandlerContext) {
+    self.eventLoop.assertInEventLoop()
+
+    let prev = existing.prev
+    new.prev = prev
+    new.next = existing
+    existing.prev = new
+    prev?.next = new
+  }
+
+  /// Remove a `ChannelHandler` from the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - handler: the `ChannelHandler` to remove.
+  /// - returns: the `EventLoopFuture` which will be notified once the `ChannelHandler` was removed.
+  public func remove(handler: ChannelHandler) -> EventLoopFuture<Bool> {
+    let promise = self.eventLoop.makePromise(of: Bool.self)
+    self.remove(handler: handler, promise: promise)
+    return promise.futureResult
+  }
+
+  /// Remove a `ChannelHandler` from the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - name: the name that was used to add the `ChannelHandler` to the `ChannelPipeline` before.
+  /// - returns: the `EventLoopFuture` which will be notified once the `ChannelHandler` was removed.
+  public func remove(name: String) -> EventLoopFuture<Bool> {
+    let promise = self.eventLoop.makePromise(of: Bool.self)
+    self.remove(name: name, promise: promise)
+    return promise.futureResult
+  }
+
+  /// Remove a `ChannelHandler` from the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - ctx: the `ChannelHandlerContext` that belongs to `ChannelHandler` that should be removed.
+  /// - returns: the `EventLoopFuture` which will be notified once the `ChannelHandler` was removed.
+  public func remove(ctx: ChannelHandlerContext) -> EventLoopFuture<Bool> {
+    let promise = self.eventLoop.makePromise(of: Bool.self)
+    self.remove(ctx: ctx, promise: promise)
+    return promise.futureResult
+  }
+
+  /// Remove a `ChannelHandler` from the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - handler: the `ChannelHandler` to remove.
+  ///     - promise: An `EventLoopPromise` that will complete when the `ChannelHandler` is removed.
+  public func remove(handler: ChannelHandler, promise: EventLoopPromise<Bool>?) {
+    let contextFuture =
+      self.context0 {
+        return $0.handler === handler
+      }.map { ctx in
+      self.remove0(ctx: ctx, promise: promise)
     }
 
-    /// Remove a `ChannelHandler` from the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - handler: the `ChannelHandler` to remove.
-    /// - returns: the `EventLoopFuture` which will be notified once the `ChannelHandler` was removed.
-    public func remove(handler: ChannelHandler) -> EventLoopFuture<Bool> {
-        let promise = self.eventLoop.makePromise(of: Bool.self)
-        self.remove(handler: handler, promise: promise)
-        return promise.futureResult
+    if let promise = promise {
+      contextFuture.cascadeFailure(promise: promise)
+    }
+  }
+
+  /// Remove a `ChannelHandler` from the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - name: the name that was used to add the `ChannelHandler` to the `ChannelPipeline` before.
+  ///     - promise: An `EventLoopPromise` that will complete when the `ChannelHandler` is removed.
+  public func remove(name: String, promise: EventLoopPromise<Bool>?) {
+    let contextFuture =
+      self.context0 {
+        $0.name == name
+      }.map { ctx in
+      self.remove0(ctx: ctx, promise: promise)
     }
 
-    /// Remove a `ChannelHandler` from the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - name: the name that was used to add the `ChannelHandler` to the `ChannelPipeline` before.
-    /// - returns: the `EventLoopFuture` which will be notified once the `ChannelHandler` was removed.
-    public func remove(name: String) -> EventLoopFuture<Bool> {
-        let promise = self.eventLoop.makePromise(of: Bool.self)
-        self.remove(name: name, promise: promise)
-        return promise.futureResult
+    if let promise = promise {
+      contextFuture.cascadeFailure(promise: promise)
+    }
+  }
+
+  /// Remove a `ChannelHandler` from the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - ctx: the `ChannelHandlerContext` that belongs to `ChannelHandler` that should be removed.
+  ///     - promise: An `EventLoopPromise` that will complete when the `ChannelHandler` is removed.
+  public func remove(ctx: ChannelHandlerContext, promise: EventLoopPromise<Bool>?) {
+    if self.eventLoop.inEventLoop {
+      self.remove0(ctx: ctx, promise: promise)
+    }
+    else {
+      self.eventLoop.execute {
+        self.remove0(ctx: ctx, promise: promise)
+      }
+    }
+  }
+
+  /// Returns the `ChannelHandlerContext` that belongs to a `ChannelHandler`.
+  ///
+  /// - parameters:
+  ///     - handler: the `ChannelHandler` for which the `ChannelHandlerContext` shoud be returned
+  /// - returns: the `EventLoopFuture` which will be notified once the the operation completes.
+  public func context(handler: ChannelHandler) -> EventLoopFuture<ChannelHandlerContext> {
+    return context0({ $0.handler === handler })
+  }
+
+  /// Returns the `ChannelHandlerContext` that belongs to a `ChannelHandler`.
+  ///
+  /// - parameters:
+  ///     - name: the name that was used to add the `ChannelHandler` to the `ChannelPipeline` before.
+  /// - returns: the `EventLoopFuture` which will be notified once the the operation completes.
+  public func context(name: String) -> EventLoopFuture<ChannelHandlerContext> {
+    return context0({ $0.name == name })
+  }
+
+  /// Returns the `ChannelHandlerContext` that belongs to a `ChannelHandler` of the given type.
+  ///
+  /// If multiple channel handlers of the same type are present in the pipeline, returns the context
+  /// belonging to the first such handler.
+  ///
+  /// - parameters:
+  ///     - handlerType: The type of the handler to search for.
+  /// - returns: the `EventLoopFuture` which will be notified once the the operation completes.
+  public func context<Handler: ChannelHandler>(handlerType: Handler.Type)
+  -> EventLoopFuture<ChannelHandlerContext> {
+    return context0({ $0.handler is Handler })
+  }
+
+  /// Find a `ChannelHandlerContext` in the `ChannelPipeline`.
+  private func context0(_ body: @escaping ((ChannelHandlerContext) -> Bool))
+  -> EventLoopFuture<ChannelHandlerContext> {
+    let promise = eventLoop.makePromise(of: ChannelHandlerContext.self)
+
+    func _context0() {
+      if let ctx = self.contextForPredicate0(body) {
+        promise.succeed(result: ctx)
+      }
+      else {
+        promise.fail(error: ChannelPipelineError.notFound)
+      }
     }
 
-    /// Remove a `ChannelHandler` from the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - ctx: the `ChannelHandlerContext` that belongs to `ChannelHandler` that should be removed.
-    /// - returns: the `EventLoopFuture` which will be notified once the `ChannelHandler` was removed.
-    public func remove(ctx: ChannelHandlerContext) -> EventLoopFuture<Bool> {
-        let promise = self.eventLoop.makePromise(of: Bool.self)
-        self.remove(ctx: ctx, promise: promise)
-        return promise.futureResult
+    if eventLoop.inEventLoop {
+      _context0()
+    }
+    else {
+      eventLoop.execute {
+        _context0()
+      }
+    }
+    return promise.futureResult
+  }
+
+  /// Returns a `ChannelHandlerContext` which matches.
+  ///
+  /// This skips head and tail (as these are internal and should not be accessible by the user).
+  ///
+  /// - parameters:
+  ///     - body: The predicate to execute per `ChannelHandlerContext` in the `ChannelPipeline`.
+  /// -returns: The first `ChannelHandlerContext` that matches or `nil` if none did.
+  private func contextForPredicate0(_ body: @escaping ((ChannelHandlerContext) -> Bool))
+  -> ChannelHandlerContext? {
+    var curCtx: ChannelHandlerContext? = self.head?.next
+    while let ctx = curCtx, ctx !== self.tail {
+      if body(ctx) {
+        return ctx
+      }
+      curCtx = ctx.next
     }
 
-    /// Remove a `ChannelHandler` from the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - handler: the `ChannelHandler` to remove.
-    ///     - promise: An `EventLoopPromise` that will complete when the `ChannelHandler` is removed.
-    public func remove(handler: ChannelHandler, promise: EventLoopPromise<Bool>?) {
-        let contextFuture = self.context0 {
-            return $0.handler === handler
-        }.map { ctx in
-            self.remove0(ctx: ctx, promise: promise)
-        }
+    return nil
+  }
 
-        if let promise = promise {
-            contextFuture.cascadeFailure(promise: promise)
-        }
+  /// Remove a `ChannelHandlerContext` from the `ChannelPipeline`. Must only be called from within the `EventLoop`.
+  private func remove0(ctx: ChannelHandlerContext, promise: EventLoopPromise<Bool>?) {
+    self.eventLoop.assertInEventLoop()
+
+    let nextCtx = ctx.next
+    let prevCtx = ctx.prev
+    if let prevCtx = prevCtx {
+      prevCtx.next = nextCtx
+    }
+    if let nextCtx = nextCtx {
+      nextCtx.prev = prevCtx
     }
 
-    /// Remove a `ChannelHandler` from the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - name: the name that was used to add the `ChannelHandler` to the `ChannelPipeline` before.
-    ///     - promise: An `EventLoopPromise` that will complete when the `ChannelHandler` is removed.
-    public func remove(name: String, promise: EventLoopPromise<Bool>?) {
-        let contextFuture = self.context0 {
-            $0.name == name
-        }.map { ctx in
-            self.remove0(ctx: ctx, promise: promise)
-        }
-
-        if let promise = promise {
-            contextFuture.cascadeFailure(promise: promise)
-        }
+    do {
+      try ctx.invokeHandlerRemoved()
+      promise?.succeed(result: true)
+    }
+    catch let err {
+      promise?.fail(error: err)
     }
 
-    /// Remove a `ChannelHandler` from the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - ctx: the `ChannelHandlerContext` that belongs to `ChannelHandler` that should be removed.
-    ///     - promise: An `EventLoopPromise` that will complete when the `ChannelHandler` is removed.
-    public func remove(ctx: ChannelHandlerContext, promise: EventLoopPromise<Bool>?) {
-        if self.eventLoop.inEventLoop {
-            self.remove0(ctx: ctx, promise: promise)
-        } else {
-            self.eventLoop.execute {
-                self.remove0(ctx: ctx, promise: promise)
-            }
-        }
+    // We need to keep the current node alive until after the callout in case the user uses the context.
+    ctx.next = nil
+    ctx.prev = nil
+  }
+
+  /// Returns the next name to use for a `ChannelHandler`.
+  private func nextName() -> String {
+    self.eventLoop.assertInEventLoop()
+
+    let name = "handler\(idx)"
+    idx += 1
+    return name
+  }
+
+  /// Remove all the `ChannelHandler`s from the `ChannelPipeline` and destroy these.
+  ///
+  /// This method must only be called from within the `EventLoop`. It should only be called from a `ChannelCore`
+  /// implementation. Once called, the `ChannelPipeline` is no longer active and cannot be used again.
+  func removeHandlers() {
+    self.eventLoop.assertInEventLoop()
+
+    if let head = self.head {
+      while let ctx = head.next {
+        remove0(ctx: ctx, promise: nil)
+      }
+      remove0(ctx: self.head!, promise: nil)
     }
+    self.head = nil
+    self.tail = nil
 
-    /// Returns the `ChannelHandlerContext` that belongs to a `ChannelHandler`.
-    ///
-    /// - parameters:
-    ///     - handler: the `ChannelHandler` for which the `ChannelHandlerContext` shoud be returned
-    /// - returns: the `EventLoopFuture` which will be notified once the the operation completes.
-    public func context(handler: ChannelHandler) -> EventLoopFuture<ChannelHandlerContext> {
-        return context0({ $0.handler === handler })
+    self.destroyed = true
+    self._channel = nil
+  }
+
+  // Just delegate to the head and tail context
+  public func fireChannelRegistered() {
+    if eventLoop.inEventLoop {
+      fireChannelRegistered0()
     }
-
-    /// Returns the `ChannelHandlerContext` that belongs to a `ChannelHandler`.
-    ///
-    /// - parameters:
-    ///     - name: the name that was used to add the `ChannelHandler` to the `ChannelPipeline` before.
-    /// - returns: the `EventLoopFuture` which will be notified once the the operation completes.
-    public func context(name: String) -> EventLoopFuture<ChannelHandlerContext> {
-        return context0({ $0.name == name })
+    else {
+      eventLoop.execute {
+        self.fireChannelRegistered0()
+      }
     }
+  }
 
-    /// Returns the `ChannelHandlerContext` that belongs to a `ChannelHandler` of the given type.
-    ///
-    /// If multiple channel handlers of the same type are present in the pipeline, returns the context
-    /// belonging to the first such handler.
-    ///
-    /// - parameters:
-    ///     - handlerType: The type of the handler to search for.
-    /// - returns: the `EventLoopFuture` which will be notified once the the operation completes.
-    public func context<Handler: ChannelHandler>(handlerType: Handler.Type) -> EventLoopFuture<ChannelHandlerContext> {
-        return context0({ $0.handler is Handler })
+  public func fireChannelUnregistered() {
+    if eventLoop.inEventLoop {
+      fireChannelUnregistered0()
     }
-
-    /// Find a `ChannelHandlerContext` in the `ChannelPipeline`.
-    private func context0(_ body: @escaping ((ChannelHandlerContext) -> Bool)) -> EventLoopFuture<ChannelHandlerContext> {
-        let promise = eventLoop.makePromise(of: ChannelHandlerContext.self)
-
-        func _context0() {
-            if let ctx = self.contextForPredicate0(body) {
-                promise.succeed(result: ctx)
-            } else {
-                promise.fail(error: ChannelPipelineError.notFound)
-            }
-        }
-
-        if eventLoop.inEventLoop {
-            _context0()
-        } else {
-            eventLoop.execute {
-                _context0()
-            }
-        }
-        return promise.futureResult
+    else {
+      eventLoop.execute {
+        self.fireChannelUnregistered0()
+      }
     }
+  }
 
-    /// Returns a `ChannelHandlerContext` which matches.
-    ///
-    /// This skips head and tail (as these are internal and should not be accessible by the user).
-    ///
-    /// - parameters:
-    ///     - body: The predicate to execute per `ChannelHandlerContext` in the `ChannelPipeline`.
-    /// -returns: The first `ChannelHandlerContext` that matches or `nil` if none did.
-    private func contextForPredicate0(_ body: @escaping((ChannelHandlerContext) -> Bool)) -> ChannelHandlerContext? {
-        var curCtx: ChannelHandlerContext? = self.head?.next
-        while let ctx = curCtx, ctx !== self.tail {
-            if body(ctx) {
-                return ctx
-            }
-            curCtx = ctx.next
-        }
-
-        return nil
+  public func fireChannelInactive() {
+    if eventLoop.inEventLoop {
+      fireChannelInactive0()
     }
-
-    /// Remove a `ChannelHandlerContext` from the `ChannelPipeline`. Must only be called from within the `EventLoop`.
-    private func remove0(ctx: ChannelHandlerContext, promise: EventLoopPromise<Bool>?) {
-        self.eventLoop.assertInEventLoop()
-
-        let nextCtx = ctx.next
-        let prevCtx = ctx.prev
-        if let prevCtx = prevCtx {
-            prevCtx.next = nextCtx
-        }
-        if let nextCtx = nextCtx {
-            nextCtx.prev = prevCtx
-        }
-
-        do {
-            try ctx.invokeHandlerRemoved()
-            promise?.succeed(result: true)
-        } catch let err {
-            promise?.fail(error: err)
-        }
-
-        // We need to keep the current node alive until after the callout in case the user uses the context.
-        ctx.next = nil
-        ctx.prev = nil
+    else {
+      eventLoop.execute {
+        self.fireChannelInactive0()
+      }
     }
+  }
 
-    /// Returns the next name to use for a `ChannelHandler`.
-    private func nextName() -> String {
-        self.eventLoop.assertInEventLoop()
-
-        let name = "handler\(idx)"
-        idx += 1
-        return name
+  public func fireChannelActive() {
+    if eventLoop.inEventLoop {
+      fireChannelActive0()
     }
-
-    /// Remove all the `ChannelHandler`s from the `ChannelPipeline` and destroy these.
-    ///
-    /// This method must only be called from within the `EventLoop`. It should only be called from a `ChannelCore`
-    /// implementation. Once called, the `ChannelPipeline` is no longer active and cannot be used again.
-    func removeHandlers() {
-        self.eventLoop.assertInEventLoop()
-
-        if let head = self.head {
-            while let ctx = head.next {
-                remove0(ctx: ctx, promise: nil)
-            }
-            remove0(ctx: self.head!, promise: nil)
-        }
-        self.head = nil
-        self.tail = nil
-
-        self.destroyed = true
-        self._channel = nil
+    else {
+      eventLoop.execute {
+        self.fireChannelActive0()
+      }
     }
+  }
 
-    // Just delegate to the head and tail context
-    public func fireChannelRegistered() {
-        if eventLoop.inEventLoop {
-            fireChannelRegistered0()
-        } else {
-            eventLoop.execute {
-                self.fireChannelRegistered0()
-            }
-        }
+  public func fireChannelRead(_ data: NIOAny) {
+    if eventLoop.inEventLoop {
+      fireChannelRead0(data)
     }
-
-    public func fireChannelUnregistered() {
-        if eventLoop.inEventLoop {
-            fireChannelUnregistered0()
-        } else {
-            eventLoop.execute {
-                self.fireChannelUnregistered0()
-            }
-        }
+    else {
+      eventLoop.execute {
+        self.fireChannelRead0(data)
+      }
     }
+  }
 
-    public func fireChannelInactive() {
-        if eventLoop.inEventLoop {
-            fireChannelInactive0()
-        } else {
-            eventLoop.execute {
-                self.fireChannelInactive0()
-            }
-        }
+  public func fireChannelReadComplete() {
+    if eventLoop.inEventLoop {
+      fireChannelReadComplete0()
     }
-
-    public func fireChannelActive() {
-        if eventLoop.inEventLoop {
-            fireChannelActive0()
-        } else {
-            eventLoop.execute {
-                self.fireChannelActive0()
-            }
-        }
+    else {
+      eventLoop.execute {
+        self.fireChannelReadComplete0()
+      }
     }
+  }
 
-    public func fireChannelRead(_ data: NIOAny) {
-        if eventLoop.inEventLoop {
-            fireChannelRead0(data)
-        } else {
-            eventLoop.execute {
-                self.fireChannelRead0(data)
-            }
-        }
+  public func fireChannelWritabilityChanged() {
+    if eventLoop.inEventLoop {
+      fireChannelWritabilityChanged0()
     }
-
-    public func fireChannelReadComplete() {
-        if eventLoop.inEventLoop {
-            fireChannelReadComplete0()
-        } else {
-            eventLoop.execute {
-                self.fireChannelReadComplete0()
-            }
-        }
+    else {
+      eventLoop.execute {
+        self.fireChannelWritabilityChanged0()
+      }
     }
+  }
 
-    public func fireChannelWritabilityChanged() {
-        if eventLoop.inEventLoop {
-            fireChannelWritabilityChanged0()
-        } else {
-            eventLoop.execute {
-                self.fireChannelWritabilityChanged0()
-            }
-        }
+  public func fireUserInboundEventTriggered(_ event: Any) {
+    if eventLoop.inEventLoop {
+      fireUserInboundEventTriggered0(event)
     }
-
-    public func fireUserInboundEventTriggered(_ event: Any) {
-        if eventLoop.inEventLoop {
-            fireUserInboundEventTriggered0(event)
-        } else {
-            eventLoop.execute {
-                self.fireUserInboundEventTriggered0(event)
-            }
-        }
+    else {
+      eventLoop.execute {
+        self.fireUserInboundEventTriggered0(event)
+      }
     }
+  }
 
-    public func fireErrorCaught(_ error: Error) {
-        if eventLoop.inEventLoop {
-            fireErrorCaught0(error: error)
-        } else {
-            eventLoop.execute {
-                self.fireErrorCaught0(error: error)
-            }
-        }
+  public func fireErrorCaught(_ error: Error) {
+    if eventLoop.inEventLoop {
+      fireErrorCaught0(error: error)
     }
-
-    public func close(mode: CloseMode = .all, promise: EventLoopPromise<Void>?) {
-        if eventLoop.inEventLoop {
-            close0(mode: mode, promise: promise)
-        } else {
-            eventLoop.execute {
-                self.close0(mode: mode, promise: promise)
-            }
-        }
+    else {
+      eventLoop.execute {
+        self.fireErrorCaught0(error: error)
+      }
     }
+  }
 
-    public func flush() {
-        if eventLoop.inEventLoop {
-            flush0()
-        } else {
-            eventLoop.execute {
-                self.flush0()
-            }
-        }
+  public func close(mode: CloseMode = .all, promise: EventLoopPromise<Void>?) {
+    if eventLoop.inEventLoop {
+      close0(mode: mode, promise: promise)
     }
-
-    public func read() {
-        if eventLoop.inEventLoop {
-            read0()
-        } else {
-            eventLoop.execute {
-                self.read0()
-            }
-        }
+    else {
+      eventLoop.execute {
+        self.close0(mode: mode, promise: promise)
+      }
     }
+  }
 
-    public func write(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
-        if eventLoop.inEventLoop {
-            write0(data, promise: promise)
-        } else {
-            eventLoop.execute {
-                self.write0(data, promise: promise)
-            }
-        }
+  public func flush() {
+    if eventLoop.inEventLoop {
+      flush0()
     }
-
-    public func writeAndFlush(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
-        if eventLoop.inEventLoop {
-            writeAndFlush0(data, promise: promise)
-        } else {
-            eventLoop.execute {
-                self.writeAndFlush0(data, promise: promise)
-            }
-        }
+    else {
+      eventLoop.execute {
+        self.flush0()
+      }
     }
+  }
 
-    public func bind(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        if eventLoop.inEventLoop {
-            bind0(to: address, promise: promise)
-        } else {
-            eventLoop.execute {
-                self.bind0(to: address, promise: promise)
-            }
-        }
+  public func read() {
+    if eventLoop.inEventLoop {
+      read0()
     }
-
-    public func connect(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        if eventLoop.inEventLoop {
-            connect0(to: address, promise: promise)
-        } else {
-            eventLoop.execute {
-                self.connect0(to: address, promise: promise)
-            }
-        }
+    else {
+      eventLoop.execute {
+        self.read0()
+      }
     }
+  }
 
-    public func register(promise: EventLoopPromise<Void>?) {
-        if eventLoop.inEventLoop {
-            register0(promise: promise)
-        } else {
-            eventLoop.execute {
-                self.register0(promise: promise)
-            }
-        }
+  public func write(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
+    if eventLoop.inEventLoop {
+      write0(data, promise: promise)
     }
-
-    public func triggerUserOutboundEvent(_ event: Any, promise: EventLoopPromise<Void>?) {
-        if eventLoop.inEventLoop {
-            triggerUserOutboundEvent0(event, promise: promise)
-        } else {
-            eventLoop.execute {
-                self.triggerUserOutboundEvent0(event, promise: promise)
-            }
-        }
+    else {
+      eventLoop.execute {
+        self.write0(data, promise: promise)
+      }
     }
+  }
 
-    // These methods are expected to only be called from within the EventLoop
-
-    private var firstOutboundCtx: ChannelHandlerContext? {
-        return self.tail?.prev
+  public func writeAndFlush(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
+    if eventLoop.inEventLoop {
+      writeAndFlush0(data, promise: promise)
     }
-
-    private var firstInboundCtx: ChannelHandlerContext? {
-        return self.head?.next
+    else {
+      eventLoop.execute {
+        self.writeAndFlush0(data, promise: promise)
+      }
     }
+  }
 
-    func close0(mode: CloseMode, promise: EventLoopPromise<Void>?) {
-        if let firstOutboundCtx = firstOutboundCtx {
-            firstOutboundCtx.invokeClose(mode: mode, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.alreadyClosed)
-        }
+  public func bind(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
+    if eventLoop.inEventLoop {
+      bind0(to: address, promise: promise)
     }
-
-    func flush0() {
-        if let firstOutboundCtx = firstOutboundCtx {
-            firstOutboundCtx.invokeFlush()
-        }
+    else {
+      eventLoop.execute {
+        self.bind0(to: address, promise: promise)
+      }
     }
+  }
 
-    func read0() {
-        if let firstOutboundCtx = firstOutboundCtx {
-            firstOutboundCtx.invokeRead()
-        }
+  public func connect(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
+    if eventLoop.inEventLoop {
+      connect0(to: address, promise: promise)
     }
-
-    func write0(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
-        if let firstOutboundCtx = firstOutboundCtx {
-            firstOutboundCtx.invokeWrite(data, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+    else {
+      eventLoop.execute {
+        self.connect0(to: address, promise: promise)
+      }
     }
+  }
 
-    func writeAndFlush0(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
-        if let firstOutboundCtx = firstOutboundCtx {
-            firstOutboundCtx.invokeWriteAndFlush(data, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+  public func register(promise: EventLoopPromise<Void>?) {
+    if eventLoop.inEventLoop {
+      register0(promise: promise)
     }
-
-    func bind0(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        if let firstOutboundCtx = firstOutboundCtx {
-            firstOutboundCtx.invokeBind(to: address, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+    else {
+      eventLoop.execute {
+        self.register0(promise: promise)
+      }
     }
+  }
 
-    func connect0(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        if let firstOutboundCtx = firstOutboundCtx {
-            firstOutboundCtx.invokeConnect(to: address, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+  public func triggerUserOutboundEvent(_ event: Any, promise: EventLoopPromise<Void>?) {
+    if eventLoop.inEventLoop {
+      triggerUserOutboundEvent0(event, promise: promise)
     }
-
-    func register0(promise: EventLoopPromise<Void>?) {
-        if let firstOutboundCtx = firstOutboundCtx {
-            firstOutboundCtx.invokeRegister(promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+    else {
+      eventLoop.execute {
+        self.triggerUserOutboundEvent0(event, promise: promise)
+      }
     }
+  }
 
-    func triggerUserOutboundEvent0(_ event: Any, promise: EventLoopPromise<Void>?) {
-        if let firstOutboundCtx = firstOutboundCtx {
-            firstOutboundCtx.invokeTriggerUserOutboundEvent(event, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+  // These methods are expected to only be called from within the EventLoop
+
+  private var firstOutboundCtx: ChannelHandlerContext? {
+    return self.tail?.prev
+  }
+
+  private var firstInboundCtx: ChannelHandlerContext? {
+    return self.head?.next
+  }
+
+  func close0(mode: CloseMode, promise: EventLoopPromise<Void>?) {
+    if let firstOutboundCtx = firstOutboundCtx {
+      firstOutboundCtx.invokeClose(mode: mode, promise: promise)
     }
-
-    func fireChannelRegistered0() {
-        if let firstInboundCtx = firstInboundCtx {
-            firstInboundCtx.invokeChannelRegistered()
-        }
+    else {
+      promise?.fail(error: ChannelError.alreadyClosed)
     }
+  }
 
-    func fireChannelUnregistered0() {
-        if let firstInboundCtx = firstInboundCtx {
-            firstInboundCtx.invokeChannelUnregistered()
-        }
+  func flush0() {
+    if let firstOutboundCtx = firstOutboundCtx {
+      firstOutboundCtx.invokeFlush()
     }
+  }
 
-    func fireChannelInactive0() {
-        if let firstInboundCtx = firstInboundCtx {
-            firstInboundCtx.invokeChannelInactive()
-        }
+  func read0() {
+    if let firstOutboundCtx = firstOutboundCtx {
+      firstOutboundCtx.invokeRead()
     }
+  }
 
-    func fireChannelActive0() {
-        if let firstInboundCtx = firstInboundCtx {
-            firstInboundCtx.invokeChannelActive()
-        }
+  func write0(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
+    if let firstOutboundCtx = firstOutboundCtx {
+      firstOutboundCtx.invokeWrite(data, promise: promise)
     }
-
-    func fireChannelRead0(_ data: NIOAny) {
-        if let firstInboundCtx = firstInboundCtx {
-            firstInboundCtx.invokeChannelRead(data)
-        }
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
     }
+  }
 
-    func fireChannelReadComplete0() {
-        if let firstInboundCtx = firstInboundCtx {
-            firstInboundCtx.invokeChannelReadComplete()
-        }
+  func writeAndFlush0(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
+    if let firstOutboundCtx = firstOutboundCtx {
+      firstOutboundCtx.invokeWriteAndFlush(data, promise: promise)
     }
-
-    func fireChannelWritabilityChanged0() {
-        if let firstInboundCtx = firstInboundCtx {
-            firstInboundCtx.invokeChannelWritabilityChanged()
-        }
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
     }
+  }
 
-    func fireUserInboundEventTriggered0(_ event: Any) {
-        if let firstInboundCtx = firstInboundCtx {
-            firstInboundCtx.invokeUserInboundEventTriggered(event)
-        }
+  func bind0(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
+    if let firstOutboundCtx = firstOutboundCtx {
+      firstOutboundCtx.invokeBind(to: address, promise: promise)
     }
-
-    func fireErrorCaught0(error: Error) {
-        assert((error as? ChannelError).map { $0 != .eof } ?? true)
-        if let firstInboundCtx = firstInboundCtx {
-            firstInboundCtx.invokeErrorCaught(error)
-        }
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
     }
+  }
 
-    private var inEventLoop: Bool {
-        return eventLoop.inEventLoop
+  func connect0(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
+    if let firstOutboundCtx = firstOutboundCtx {
+      firstOutboundCtx.invokeConnect(to: address, promise: promise)
     }
-
-    /// Create `ChannelPipeline` for a given `Channel`. This method should never be called by the end-user
-    /// directly: it is only intended for use with custom `Channel` implementations. Users should always use
-    /// `channel.pipeline` to access the `ChannelPipeline` for a `Channel`.
-    ///
-    /// - parameters:
-    ///    - channel: The `Channel` this `ChannelPipeline` is created for.
-    public init(channel: Channel) {
-        self._channel = channel
-        self.eventLoop = channel.eventLoop
-
-        self.head = ChannelHandlerContext(name: HeadChannelHandler.name, handler: HeadChannelHandler.sharedInstance, pipeline: self)
-        self.tail = ChannelHandlerContext(name: TailChannelHandler.name, handler: TailChannelHandler.sharedInstance, pipeline: self)
-        self.head?.next = self.tail
-        self.tail?.prev = self.head
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
     }
+  }
+
+  func register0(promise: EventLoopPromise<Void>?) {
+    if let firstOutboundCtx = firstOutboundCtx {
+      firstOutboundCtx.invokeRegister(promise: promise)
+    }
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
+    }
+  }
+
+  func triggerUserOutboundEvent0(_ event: Any, promise: EventLoopPromise<Void>?) {
+    if let firstOutboundCtx = firstOutboundCtx {
+      firstOutboundCtx.invokeTriggerUserOutboundEvent(event, promise: promise)
+    }
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
+    }
+  }
+
+  func fireChannelRegistered0() {
+    if let firstInboundCtx = firstInboundCtx {
+      firstInboundCtx.invokeChannelRegistered()
+    }
+  }
+
+  func fireChannelUnregistered0() {
+    if let firstInboundCtx = firstInboundCtx {
+      firstInboundCtx.invokeChannelUnregistered()
+    }
+  }
+
+  func fireChannelInactive0() {
+    if let firstInboundCtx = firstInboundCtx {
+      firstInboundCtx.invokeChannelInactive()
+    }
+  }
+
+  func fireChannelActive0() {
+    if let firstInboundCtx = firstInboundCtx {
+      firstInboundCtx.invokeChannelActive()
+    }
+  }
+
+  func fireChannelRead0(_ data: NIOAny) {
+    if let firstInboundCtx = firstInboundCtx {
+      firstInboundCtx.invokeChannelRead(data)
+    }
+  }
+
+  func fireChannelReadComplete0() {
+    if let firstInboundCtx = firstInboundCtx {
+      firstInboundCtx.invokeChannelReadComplete()
+    }
+  }
+
+  func fireChannelWritabilityChanged0() {
+    if let firstInboundCtx = firstInboundCtx {
+      firstInboundCtx.invokeChannelWritabilityChanged()
+    }
+  }
+
+  func fireUserInboundEventTriggered0(_ event: Any) {
+    if let firstInboundCtx = firstInboundCtx {
+      firstInboundCtx.invokeUserInboundEventTriggered(event)
+    }
+  }
+
+  func fireErrorCaught0(error: Error) {
+    assert((error as? ChannelError).map { $0 != .eof } ?? true)
+    if let firstInboundCtx = firstInboundCtx {
+      firstInboundCtx.invokeErrorCaught(error)
+    }
+  }
+
+  private var inEventLoop: Bool {
+    return eventLoop.inEventLoop
+  }
+
+  /// Create `ChannelPipeline` for a given `Channel`. This method should never be called by the end-user
+  /// directly: it is only intended for use with custom `Channel` implementations. Users should always use
+  /// `channel.pipeline` to access the `ChannelPipeline` for a `Channel`.
+  ///
+  /// - parameters:
+  ///    - channel: The `Channel` this `ChannelPipeline` is created for.
+  public init(channel: Channel) {
+    self._channel = channel
+    self.eventLoop = channel.eventLoop
+
+    self.head = ChannelHandlerContext(
+      name: HeadChannelHandler.name,
+      handler: HeadChannelHandler.sharedInstance,
+      pipeline: self)
+    self.tail = ChannelHandlerContext(
+      name: TailChannelHandler.name,
+      handler: TailChannelHandler.sharedInstance,
+      pipeline: self)
+    self.head?.next = self.tail
+    self.tail?.prev = self.head
+  }
 }
 
 extension ChannelPipeline {
-    /// Adds the provided channel handlers to the pipeline in the order given, taking account
-    /// of the behaviour of `ChannelHandler.add(first:)`.
-    ///
-    /// - parameters:
-    ///     - handlers: The array of `ChannelHandler`s to be added.
-    ///     - first: If `true`, the supplied `ChannelHandler`s will be added to the front of the pipeline.
-    ///              If `false`, they will be added to the back.
-    ///
-    /// - returns: A future that will be completed when all of the supplied `ChannelHandler`s were added.
-    public func addHandlers(_ handlers: [ChannelHandler], first: Bool) -> EventLoopFuture<Void> {
-        var handlers = handlers
-        if first {
-            handlers = handlers.reversed()
-        }
-
-        return EventLoopFuture<Void>.andAll(handlers.map { add(handler: $0, first: first) }, eventLoop: eventLoop)
+  /// Adds the provided channel handlers to the pipeline in the order given, taking account
+  /// of the behaviour of `ChannelHandler.add(first:)`.
+  ///
+  /// - parameters:
+  ///     - handlers: The array of `ChannelHandler`s to be added.
+  ///     - first: If `true`, the supplied `ChannelHandler`s will be added to the front of the pipeline.
+  ///              If `false`, they will be added to the back.
+  ///
+  /// - returns: A future that will be completed when all of the supplied `ChannelHandler`s were added.
+  public func addHandlers(_ handlers: [ChannelHandler], first: Bool) -> EventLoopFuture<Void> {
+    var handlers = handlers
+    if first {
+      handlers = handlers.reversed()
     }
 
-    /// Adds the provided channel handlers to the pipeline in the order given, taking account
-    /// of the behaviour of `ChannelHandler.add(first:)`.
-    ///
-    /// - parameters:
-    ///     - handlers: One or more `ChannelHandler`s to be added.
-    ///     - first: If `true`, the supplied `ChannelHandler`s will be added to the front of the pipeline.
-    ///              If `false`, they will be added to the back.
-    ///
-    /// - returns: A future that will be completed when all of the supplied `ChannelHandler`s were added.
-    public func addHandlers(_ handlers: ChannelHandler..., first: Bool) -> EventLoopFuture<Void> {
-        return addHandlers(handlers, first: first)
-    }
+    return EventLoopFuture<Void>.andAll(
+      handlers.map { add(handler: $0, first: first) },
+      eventLoop: eventLoop)
+  }
+
+  /// Adds the provided channel handlers to the pipeline in the order given, taking account
+  /// of the behaviour of `ChannelHandler.add(first:)`.
+  ///
+  /// - parameters:
+  ///     - handlers: One or more `ChannelHandler`s to be added.
+  ///     - first: If `true`, the supplied `ChannelHandler`s will be added to the front of the pipeline.
+  ///              If `false`, they will be added to the back.
+  ///
+  /// - returns: A future that will be completed when all of the supplied `ChannelHandler`s were added.
+  public func addHandlers(_ handlers: ChannelHandler..., first: Bool) -> EventLoopFuture<Void> {
+    return addHandlers(handlers, first: first)
+  }
 }
 
 /// Special `ChannelHandler` that forwards all events to the `Channel.Unsafe` implementation.
-/* private but tests */ final class HeadChannelHandler: _ChannelOutboundHandler {
+// private but tests
+final class HeadChannelHandler: _ChannelOutboundHandler {
 
-    static let name = "head"
-    static let sharedInstance = HeadChannelHandler()
+  static let name = "head"
+  static let sharedInstance = HeadChannelHandler()
 
-    private init() { }
+  private init() {}
 
-    func register(ctx: ChannelHandlerContext, promise: EventLoopPromise<Void>?) {
-        ctx.channel._unsafe.register0(promise: promise)
+  func register(ctx: ChannelHandlerContext, promise: EventLoopPromise<Void>?) {
+    ctx.channel._unsafe.register0(promise: promise)
+  }
+
+  func bind(ctx: ChannelHandlerContext, to address: SocketAddress, promise: EventLoopPromise<Void>?)
+  {
+    ctx.channel._unsafe.bind0(to: address, promise: promise)
+  }
+
+  func connect(
+    ctx: ChannelHandlerContext,
+    to address: SocketAddress,
+    promise: EventLoopPromise<Void>?
+  ) {
+    ctx.channel._unsafe.connect0(to: address, promise: promise)
+  }
+
+  func write(ctx: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
+    ctx.channel._unsafe.write0(data, promise: promise)
+  }
+
+  func flush(ctx: ChannelHandlerContext) {
+    ctx.channel._unsafe.flush0()
+  }
+
+  func close(ctx: ChannelHandlerContext, mode: CloseMode, promise: EventLoopPromise<Void>?) {
+    ctx.channel._unsafe.close0(error: mode.error, mode: mode, promise: promise)
+  }
+
+  func read(ctx: ChannelHandlerContext) {
+    ctx.channel._unsafe.read0()
+  }
+
+  func triggerUserOutboundEvent(
+    ctx: ChannelHandlerContext,
+    event: Any,
+    promise: EventLoopPromise<Void>?
+  ) {
+    ctx.channel._unsafe.triggerUserOutboundEvent0(event, promise: promise)
+  }
+  }
+
+extension CloseMode {
+  /// Returns the error to fail outstanding operations writes with.
+  private var error: ChannelError {
+    switch self {
+    case .all:
+      return .ioOnClosedChannel
+    case .output:
+      return .outputClosed
+    case .input:
+      return .inputClosed
     }
-
-    func bind(ctx: ChannelHandlerContext, to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        ctx.channel._unsafe.bind0(to: address, promise: promise)
-    }
-
-    func connect(ctx: ChannelHandlerContext, to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        ctx.channel._unsafe.connect0(to: address, promise: promise)
-    }
-
-    func write(ctx: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
-        ctx.channel._unsafe.write0(data, promise: promise)
-    }
-
-    func flush(ctx: ChannelHandlerContext) {
-        ctx.channel._unsafe.flush0()
-    }
-
-    func close(ctx: ChannelHandlerContext, mode: CloseMode, promise: EventLoopPromise<Void>?) {
-        ctx.channel._unsafe.close0(error: mode.error, mode: mode, promise: promise)
-    }
-
-    func read(ctx: ChannelHandlerContext) {
-        ctx.channel._unsafe.read0()
-    }
-
-    func triggerUserOutboundEvent(ctx: ChannelHandlerContext, event: Any, promise: EventLoopPromise<Void>?) {
-        ctx.channel._unsafe.triggerUserOutboundEvent0(event, promise: promise)
-    }
-
-}
-
-private extension CloseMode {
-    /// Returns the error to fail outstanding operations writes with.
-    var error: ChannelError {
-        switch self {
-        case .all:
-            return .ioOnClosedChannel
-        case .output:
-            return .outputClosed
-        case .input:
-            return .inputClosed
-        }
-    }
+  }
 }
 
 /// Special `ChannelInboundHandler` which will consume all inbound events.
-/* private but tests */ final class TailChannelHandler: _ChannelInboundHandler {
+// private but tests
+final class TailChannelHandler: _ChannelInboundHandler {
 
-    static let name = "tail"
-    static let sharedInstance = TailChannelHandler()
+  static let name = "tail"
+  static let sharedInstance = TailChannelHandler()
 
-    private init() { }
+  private init() {}
 
-    func channelRegistered(ctx: ChannelHandlerContext) {
-        // Discard
-    }
+  func channelRegistered(ctx: ChannelHandlerContext) {
+    // Discard
+  }
 
-    func channelUnregistered(ctx: ChannelHandlerContext) {
-        // Discard
-    }
+  func channelUnregistered(ctx: ChannelHandlerContext) {
+    // Discard
+  }
 
-    func channelActive(ctx: ChannelHandlerContext) {
-        // Discard
-    }
+  func channelActive(ctx: ChannelHandlerContext) {
+    // Discard
+  }
 
-    func channelInactive(ctx: ChannelHandlerContext) {
-        // Discard
-    }
+  func channelInactive(ctx: ChannelHandlerContext) {
+    // Discard
+  }
 
-    func channelReadComplete(ctx: ChannelHandlerContext) {
-        // Discard
-    }
+  func channelReadComplete(ctx: ChannelHandlerContext) {
+    // Discard
+  }
 
-    func channelWritabilityChanged(ctx: ChannelHandlerContext) {
-        // Discard
-    }
+  func channelWritabilityChanged(ctx: ChannelHandlerContext) {
+    // Discard
+  }
 
-    func userInboundEventTriggered(ctx: ChannelHandlerContext, event: Any) {
-        // Discard
-    }
+  func userInboundEventTriggered(ctx: ChannelHandlerContext, event: Any) {
+    // Discard
+  }
 
-    func errorCaught(ctx: ChannelHandlerContext, error: Error) {
-        ctx.channel._unsafe.errorCaught0(error: error)
-    }
+  func errorCaught(ctx: ChannelHandlerContext, error: Error) {
+    ctx.channel._unsafe.errorCaught0(error: error)
+  }
 
-    func channelRead(ctx: ChannelHandlerContext, data: NIOAny) {
-        ctx.channel._unsafe.channelRead0(data)
-    }
+  func channelRead(ctx: ChannelHandlerContext, data: NIOAny) {
+    ctx.channel._unsafe.channelRead0(data)
+  }
 }
 
 /// `Error` that is used by the `ChannelPipeline` to inform the user of an error.
 public enum ChannelPipelineError: Error {
-    /// `ChannelHandler` was already removed.
-    case alreadyRemoved
-    /// `ChannelHandler` was not found.
-    case notFound
+  /// `ChannelHandler` was already removed.
+  case alreadyRemoved
+  /// `ChannelHandler` was not found.
+  case notFound
 }
 
 /// Every `ChannelHandler` has -- when added to a `ChannelPipeline` -- a corresponding `ChannelHandlerContext` which is
@@ -1045,447 +1144,492 @@ public enum ChannelPipelineError: Error {
 /// at the right point in time. Often, the right behaviour is to react to an event and then forward it to the next
 /// `ChannelHandler`.
 public final class ChannelHandlerContext: ChannelInvoker {
-    // visible for ChannelPipeline to modify
-    fileprivate var next: ChannelHandlerContext?
-    fileprivate var prev: ChannelHandlerContext?
+  // visible for ChannelPipeline to modify
+  fileprivate var next: ChannelHandlerContext?
+  fileprivate var prev: ChannelHandlerContext?
 
-    public let pipeline: ChannelPipeline
+  public let pipeline: ChannelPipeline
 
-    public var channel: Channel {
-        return self.pipeline.channel
+  public var channel: Channel {
+    return self.pipeline.channel
+  }
+
+  public var handler: ChannelHandler {
+    return self.inboundHandler ?? self.outboundHandler!
+  }
+
+  public var remoteAddress: SocketAddress? {
+    do {
+      // Fast-path access to the remoteAddress.
+      return try self.channel._unsafe.remoteAddress0()
     }
-
-    public var handler: ChannelHandler {
-        return self.inboundHandler ?? self.outboundHandler!
+    catch ChannelError.ioOnClosedChannel {
+      // Channel was closed already but we may still have the address cached so try to access it via the Channel
+      // so we are able to use it in channelInactive(...) / handlerRemoved(...) methods.
+      return self.channel.remoteAddress
     }
-
-    public var remoteAddress: SocketAddress? {
-        do {
-            // Fast-path access to the remoteAddress.
-            return try self.channel._unsafe.remoteAddress0()
-        } catch ChannelError.ioOnClosedChannel {
-            // Channel was closed already but we may still have the address cached so try to access it via the Channel
-            // so we are able to use it in channelInactive(...) / handlerRemoved(...) methods.
-            return self.channel.remoteAddress
-        } catch {
-            return nil
-        }
+    catch {
+      return nil
     }
+  }
 
-    public var localAddress: SocketAddress? {
-        do {
-            // Fast-path access to the localAddress.
-            return try self.channel._unsafe.localAddress0()
-        } catch ChannelError.ioOnClosedChannel {
-            // Channel was closed already but we may still have the address cached so try to access it via the Channel
-            // so we are able to use it in channelInactive(...) / handlerRemoved(...) methods.
-            return self.channel.localAddress
-        } catch {
-            return nil
-        }
+  public var localAddress: SocketAddress? {
+    do {
+      // Fast-path access to the localAddress.
+      return try self.channel._unsafe.localAddress0()
     }
-
-    public var eventLoop: EventLoop {
-        return self.pipeline.eventLoop
+    catch ChannelError.ioOnClosedChannel {
+      // Channel was closed already but we may still have the address cached so try to access it via the Channel
+      // so we are able to use it in channelInactive(...) / handlerRemoved(...) methods.
+      return self.channel.localAddress
     }
-
-    public let name: String
-    private let inboundHandler: _ChannelInboundHandler?
-    private let outboundHandler: _ChannelOutboundHandler?
-
-    // Only created from within ChannelPipeline
-    fileprivate init(name: String, handler: ChannelHandler, pipeline: ChannelPipeline) {
-        self.name = name
-        self.pipeline = pipeline
-        self.inboundHandler = handler as? _ChannelInboundHandler
-        self.outboundHandler = handler as? _ChannelOutboundHandler
-        precondition(self.inboundHandler != nil || self.outboundHandler != nil, "ChannelHandlers need to either be inbound or outbound")
+    catch {
+      return nil
     }
+  }
 
-    /// Send a `channelRegistered` event to the next (inbound) `ChannelHandler` in the `ChannelPipeline`.
-    ///
-    /// - note: For correct operation it is very important to forward any `channelRegistered` event using this method at the right point in time, that is usually when received.
-    public func fireChannelRegistered() {
-        self.next?.invokeChannelRegistered()
+  public var eventLoop: EventLoop {
+    return self.pipeline.eventLoop
+  }
+
+  public let name: String
+  private let inboundHandler: _ChannelInboundHandler?
+  private let outboundHandler: _ChannelOutboundHandler?
+
+  // Only created from within ChannelPipeline
+  fileprivate init(name: String, handler: ChannelHandler, pipeline: ChannelPipeline) {
+    self.name = name
+    self.pipeline = pipeline
+    self.inboundHandler = handler as? _ChannelInboundHandler
+    self.outboundHandler = handler as? _ChannelOutboundHandler
+    precondition(
+      self.inboundHandler != nil || self.outboundHandler != nil,
+      "ChannelHandlers need to either be inbound or outbound")
+  }
+
+  /// Send a `channelRegistered` event to the next (inbound) `ChannelHandler` in the `ChannelPipeline`.
+  ///
+  /// - note: For correct operation it is very important to forward any `channelRegistered` event using this method at the right point in time, that is usually when received.
+  public func fireChannelRegistered() {
+    self.next?.invokeChannelRegistered()
+  }
+
+  /// Send a `channelUnregistered` event to the next (inbound) `ChannelHandler` in the `ChannelPipeline`.
+  ///
+  /// - note: For correct operation it is very important to forward any `channelUnregistered` event using this method at the right point in time, that is usually when received.
+  public func fireChannelUnregistered() {
+    self.next?.invokeChannelUnregistered()
+  }
+
+  /// Send a `channelActive` event to the next (inbound) `ChannelHandler` in the `ChannelPipeline`.
+  ///
+  /// - note: For correct operation it is very important to forward any `channelActive` event using this method at the right point in time, that is often when received.
+  public func fireChannelActive() {
+    self.next?.invokeChannelActive()
+  }
+
+  /// Send a `channelInactive` event to the next (inbound) `ChannelHandler` in the `ChannelPipeline`.
+  ///
+  /// - note: For correct operation it is very important to forward any `channelInactive` event using this method at the right point in time, that is often when received.
+  public func fireChannelInactive() {
+    self.next?.invokeChannelInactive()
+  }
+
+  /// Send data to the next inbound `ChannelHandler`. The data should be of type `ChannelInboundHandler.InboundOut`.
+  public func fireChannelRead(_ data: NIOAny) {
+    self.next?.invokeChannelRead(data)
+  }
+
+  /// Signal to the next `ChannelHandler` that a read burst has finished.
+  public func fireChannelReadComplete() {
+    self.next?.invokeChannelReadComplete()
+  }
+
+  /// Send a `writabilityChanged` event to the next (inbound) `ChannelHandler` in the `ChannelPipeline`.
+  ///
+  /// - note: For correct operation it is very important to forward any `writabilityChanged` event using this method at the right point in time, that is usually when received.
+  public func fireChannelWritabilityChanged() {
+    self.next?.invokeChannelWritabilityChanged()
+  }
+
+  /// Send an error to the next inbound `ChannelHandler`.
+  public func fireErrorCaught(_ error: Error) {
+    self.next?.invokeErrorCaught(error)
+  }
+
+  /// Send a user event to the next inbound `ChannelHandler`.
+  public func fireUserInboundEventTriggered(_ event: Any) {
+    self.next?.invokeUserInboundEventTriggered(event)
+  }
+
+  /// Send a `register` event to the next (outbound) `ChannelHandler` in the `ChannelPipeline`.
+  ///
+  /// - note: For correct operation it is very important to forward any `register` event using this method at the right point in time, that is usually when received.
+  public func register(promise: EventLoopPromise<Void>?) {
+    if let outboundNext = self.prev {
+      outboundNext.invokeRegister(promise: promise)
     }
-
-    /// Send a `channelUnregistered` event to the next (inbound) `ChannelHandler` in the `ChannelPipeline`.
-    ///
-    /// - note: For correct operation it is very important to forward any `channelUnregistered` event using this method at the right point in time, that is usually when received.
-    public func fireChannelUnregistered() {
-        self.next?.invokeChannelUnregistered()
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
     }
+  }
 
-    /// Send a `channelActive` event to the next (inbound) `ChannelHandler` in the `ChannelPipeline`.
-    ///
-    /// - note: For correct operation it is very important to forward any `channelActive` event using this method at the right point in time, that is often when received.
-    public func fireChannelActive() {
-        self.next?.invokeChannelActive()
+  /// Send a `bind` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
+  /// When the `bind` event reaches the `HeadChannelHandler` a `ServerSocketChannel` will be bound.
+  ///
+  /// - parameters:
+  ///     - address: The address to bind to.
+  ///     - promise: The promise fulfilled when the socket is bound or failed if it cannot be bound.
+  public func bind(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
+    if let outboundNext = self.prev {
+      outboundNext.invokeBind(to: address, promise: promise)
     }
-
-    /// Send a `channelInactive` event to the next (inbound) `ChannelHandler` in the `ChannelPipeline`.
-    ///
-    /// - note: For correct operation it is very important to forward any `channelInactive` event using this method at the right point in time, that is often when received.
-    public func fireChannelInactive() {
-        self.next?.invokeChannelInactive()
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
     }
+  }
 
-    /// Send data to the next inbound `ChannelHandler`. The data should be of type `ChannelInboundHandler.InboundOut`.
-    public func fireChannelRead(_ data: NIOAny) {
-        self.next?.invokeChannelRead(data)
+  /// Send a `connect` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
+  /// When the `connect` event reaches the `HeadChannelHandler` a `SocketChannel` will be connected.
+  ///
+  /// - parameters:
+  ///     - address: The address to connect to.
+  ///     - promise: The promise fulfilled when the socket is connected or failed if it cannot be connected.
+  public func connect(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
+    if let outboundNext = self.prev {
+      outboundNext.invokeConnect(to: address, promise: promise)
     }
-
-    /// Signal to the next `ChannelHandler` that a read burst has finished.
-    public func fireChannelReadComplete() {
-        self.next?.invokeChannelReadComplete()
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
     }
+  }
 
-    /// Send a `writabilityChanged` event to the next (inbound) `ChannelHandler` in the `ChannelPipeline`.
-    ///
-    /// - note: For correct operation it is very important to forward any `writabilityChanged` event using this method at the right point in time, that is usually when received.
-    public func fireChannelWritabilityChanged() {
-        self.next?.invokeChannelWritabilityChanged()
+  /// Send a `write` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
+  /// When the `write` event reaches the `HeadChannelHandler` the data will be enqueued to be written on the next
+  /// `flush` event.
+  ///
+  /// - parameters:
+  ///     - data: The data to write, should be of type `ChannelOutboundHandler.OutboundOut`.
+  ///     - promise: The promise fulfilled when the data has been written or failed if it cannot be written.
+  public func write(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
+    if let outboundNext = self.prev {
+      outboundNext.invokeWrite(data, promise: promise)
     }
-
-    /// Send an error to the next inbound `ChannelHandler`.
-    public func fireErrorCaught(_ error: Error) {
-        self.next?.invokeErrorCaught(error)
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
     }
+  }
 
-    /// Send a user event to the next inbound `ChannelHandler`.
-    public func fireUserInboundEventTriggered(_ event: Any) {
-        self.next?.invokeUserInboundEventTriggered(event)
+  /// Send a `flush` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
+  /// When the `flush` event reaches the `HeadChannelHandler` the data previously enqueued will be attempted to be
+  /// written to the socket.
+  ///
+  /// - parameters:
+  ///     - promise: The promise fulfilled when the previously written data been flushed or failed if it cannot be flushed.
+  public func flush() {
+    if let outboundNext = self.prev {
+      outboundNext.invokeFlush()
     }
+  }
 
-    /// Send a `register` event to the next (outbound) `ChannelHandler` in the `ChannelPipeline`.
-    ///
-    /// - note: For correct operation it is very important to forward any `register` event using this method at the right point in time, that is usually when received.
-    public func register(promise: EventLoopPromise<Void>?) {
-        if let outboundNext = self.prev {
-            outboundNext.invokeRegister(promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+  /// Send a `write` event followed by a `flush` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
+  /// When the `write` event reaches the `HeadChannelHandler` the data will be enqueued to be written when the `flush`
+  /// also reaches the `HeadChannelHandler`.
+  ///
+  /// - parameters:
+  ///     - data: The data to write, should be of type `ChannelOutboundHandler.OutboundOut`.
+  ///     - promise: The promise fulfilled when the previously written data been written and flushed or if that failed.
+  public func writeAndFlush(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
+    if let outboundNext = self.prev {
+      outboundNext.invokeWriteAndFlush(data, promise: promise)
     }
-
-    /// Send a `bind` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
-    /// When the `bind` event reaches the `HeadChannelHandler` a `ServerSocketChannel` will be bound.
-    ///
-    /// - parameters:
-    ///     - address: The address to bind to.
-    ///     - promise: The promise fulfilled when the socket is bound or failed if it cannot be bound.
-    public func bind(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        if let outboundNext = self.prev {
-            outboundNext.invokeBind(to: address, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
     }
+  }
 
-    /// Send a `connect` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
-    /// When the `connect` event reaches the `HeadChannelHandler` a `SocketChannel` will be connected.
-    ///
-    /// - parameters:
-    ///     - address: The address to connect to.
-    ///     - promise: The promise fulfilled when the socket is connected or failed if it cannot be connected.
-    public func connect(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        if let outboundNext = self.prev {
-            outboundNext.invokeConnect(to: address, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+  /// Send a `read` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
+  /// When the `read` event reaches the `HeadChannelHandler` the interest to read data will be signalled to the
+  /// `Selector`. This will subsequently -- when data becomes readable -- cause `channelRead` events containing the
+  /// data being sent through the `ChannelPipeline`.
+  public func read() {
+    if let outboundNext = self.prev {
+      outboundNext.invokeRead()
     }
+  }
 
-    /// Send a `write` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
-    /// When the `write` event reaches the `HeadChannelHandler` the data will be enqueued to be written on the next
-    /// `flush` event.
-    ///
-    /// - parameters:
-    ///     - data: The data to write, should be of type `ChannelOutboundHandler.OutboundOut`.
-    ///     - promise: The promise fulfilled when the data has been written or failed if it cannot be written.
-    public func write(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
-        if let outboundNext = self.prev {
-            outboundNext.invokeWrite(data, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+  /// Send a `close` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
+  /// When the `close` event reaches the `HeadChannelHandler` the socket will be closed.
+  ///
+  /// - parameters:
+  ///     - mode: The `CloseMode` to use.
+  ///     - promise: The promise fulfilled when the `Channel` has been closed or failed if it the closing failed.
+  public func close(mode: CloseMode = .all, promise: EventLoopPromise<Void>?) {
+    if let outboundNext = self.prev {
+      outboundNext.invokeClose(mode: mode, promise: promise)
     }
-
-    /// Send a `flush` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
-    /// When the `flush` event reaches the `HeadChannelHandler` the data previously enqueued will be attempted to be
-    /// written to the socket.
-    ///
-    /// - parameters:
-    ///     - promise: The promise fulfilled when the previously written data been flushed or failed if it cannot be flushed.
-    public func flush() {
-        if let outboundNext = self.prev {
-            outboundNext.invokeFlush()
-        }
+    else {
+      promise?.fail(error: ChannelError.alreadyClosed)
     }
+  }
 
-    /// Send a `write` event followed by a `flush` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
-    /// When the `write` event reaches the `HeadChannelHandler` the data will be enqueued to be written when the `flush`
-    /// also reaches the `HeadChannelHandler`.
-    ///
-    /// - parameters:
-    ///     - data: The data to write, should be of type `ChannelOutboundHandler.OutboundOut`.
-    ///     - promise: The promise fulfilled when the previously written data been written and flushed or if that failed.
-    public func writeAndFlush(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
-        if let outboundNext = self.prev {
-            outboundNext.invokeWriteAndFlush(data, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+  /// Send a user event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
+  ///
+  /// - parameters:
+  ///     - event: The user event to send.
+  ///     - promise: The promise fulfilled when the user event has been sent or failed if it couldn't be sent.
+  public func triggerUserOutboundEvent(_ event: Any, promise: EventLoopPromise<Void>?) {
+    if let outboundNext = self.prev {
+      outboundNext.invokeTriggerUserOutboundEvent(event, promise: promise)
     }
-
-    /// Send a `read` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
-    /// When the `read` event reaches the `HeadChannelHandler` the interest to read data will be signalled to the
-    /// `Selector`. This will subsequently -- when data becomes readable -- cause `channelRead` events containing the
-    /// data being sent through the `ChannelPipeline`.
-    public func read() {
-        if let outboundNext = self.prev {
-            outboundNext.invokeRead()
-        }
+    else {
+      promise?.fail(error: ChannelError.ioOnClosedChannel)
     }
+  }
 
-    /// Send a `close` event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
-    /// When the `close` event reaches the `HeadChannelHandler` the socket will be closed.
-    ///
-    /// - parameters:
-    ///     - mode: The `CloseMode` to use.
-    ///     - promise: The promise fulfilled when the `Channel` has been closed or failed if it the closing failed.
-    public func close(mode: CloseMode = .all, promise: EventLoopPromise<Void>?) {
-        if let outboundNext = self.prev {
-            outboundNext.invokeClose(mode: mode, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.alreadyClosed)
-        }
+  fileprivate func invokeChannelRegistered() {
+    self.eventLoop.assertInEventLoop()
+
+    if let inboundHandler = self.inboundHandler {
+      inboundHandler.channelRegistered(ctx: self)
     }
-
-    /// Send a user event to the next outbound `ChannelHandler` in the `ChannelPipeline`.
-    ///
-    /// - parameters:
-    ///     - event: The user event to send.
-    ///     - promise: The promise fulfilled when the user event has been sent or failed if it couldn't be sent.
-    public func triggerUserOutboundEvent(_ event: Any, promise: EventLoopPromise<Void>?) {
-        if let outboundNext = self.prev {
-            outboundNext.invokeTriggerUserOutboundEvent(event, promise: promise)
-        } else {
-            promise?.fail(error: ChannelError.ioOnClosedChannel)
-        }
+    else {
+      self.next?.invokeChannelRegistered()
     }
+  }
 
-    fileprivate func invokeChannelRegistered() {
-        self.eventLoop.assertInEventLoop()
+  fileprivate func invokeChannelUnregistered() {
+    self.eventLoop.assertInEventLoop()
 
-        if let inboundHandler = self.inboundHandler {
-            inboundHandler.channelRegistered(ctx: self)
-        } else {
-            self.next?.invokeChannelRegistered()
-        }
+    if let inboundHandler = self.inboundHandler {
+      inboundHandler.channelUnregistered(ctx: self)
     }
-
-    fileprivate func invokeChannelUnregistered() {
-        self.eventLoop.assertInEventLoop()
-
-        if let inboundHandler = self.inboundHandler {
-            inboundHandler.channelUnregistered(ctx: self)
-        } else {
-            self.next?.invokeChannelUnregistered()
-        }
+    else {
+      self.next?.invokeChannelUnregistered()
     }
+  }
 
-    fileprivate func invokeChannelActive() {
-        self.eventLoop.assertInEventLoop()
+  fileprivate func invokeChannelActive() {
+    self.eventLoop.assertInEventLoop()
 
-        if let inboundHandler = self.inboundHandler {
-            inboundHandler.channelActive(ctx: self)
-        } else {
-            self.next?.invokeChannelActive()
-        }
+    if let inboundHandler = self.inboundHandler {
+      inboundHandler.channelActive(ctx: self)
     }
-
-    fileprivate func invokeChannelInactive() {
-        self.eventLoop.assertInEventLoop()
-
-        if let inboundHandler = self.inboundHandler {
-            inboundHandler.channelInactive(ctx: self)
-        } else {
-            self.next?.invokeChannelInactive()
-        }
+    else {
+      self.next?.invokeChannelActive()
     }
+  }
 
-    fileprivate func invokeChannelRead(_ data: NIOAny) {
-        self.eventLoop.assertInEventLoop()
+  fileprivate func invokeChannelInactive() {
+    self.eventLoop.assertInEventLoop()
 
-        if let inboundHandler = self.inboundHandler {
-            inboundHandler.channelRead(ctx: self, data: data)
-        } else {
-            self.next?.invokeChannelRead(data)
-        }
+    if let inboundHandler = self.inboundHandler {
+      inboundHandler.channelInactive(ctx: self)
     }
-
-    fileprivate func invokeChannelReadComplete() {
-        self.eventLoop.assertInEventLoop()
-
-        if let inboundHandler = self.inboundHandler {
-            inboundHandler.channelReadComplete(ctx: self)
-        } else {
-            self.next?.invokeChannelReadComplete()
-        }
+    else {
+      self.next?.invokeChannelInactive()
     }
+  }
 
-    fileprivate func invokeChannelWritabilityChanged() {
-        self.eventLoop.assertInEventLoop()
+  fileprivate func invokeChannelRead(_ data: NIOAny) {
+    self.eventLoop.assertInEventLoop()
 
-        if let inboundHandler = self.inboundHandler {
-            inboundHandler.channelWritabilityChanged(ctx: self)
-        } else {
-            self.next?.invokeChannelWritabilityChanged()
-        }
+    if let inboundHandler = self.inboundHandler {
+      inboundHandler.channelRead(ctx: self, data: data)
     }
-
-    fileprivate func invokeErrorCaught(_ error: Error) {
-        self.eventLoop.assertInEventLoop()
-
-        if let inboundHandler = self.inboundHandler {
-            inboundHandler.errorCaught(ctx: self, error: error)
-        } else {
-            self.next?.invokeErrorCaught(error)
-        }
+    else {
+      self.next?.invokeChannelRead(data)
     }
+  }
 
-    fileprivate func invokeUserInboundEventTriggered(_ event: Any) {
-        self.eventLoop.assertInEventLoop()
+  fileprivate func invokeChannelReadComplete() {
+    self.eventLoop.assertInEventLoop()
 
-        if let inboundHandler = self.inboundHandler {
-            inboundHandler.userInboundEventTriggered(ctx: self, event: event)
-        } else {
-            self.next?.invokeUserInboundEventTriggered(event)
-        }
+    if let inboundHandler = self.inboundHandler {
+      inboundHandler.channelReadComplete(ctx: self)
     }
-
-    fileprivate func invokeRegister(promise: EventLoopPromise<Void>?) {
-        self.eventLoop.assertInEventLoop()
-        assert(promise.map { !$0.futureResult.isFulfilled } ?? true, "Promise \(promise!) already fulfilled")
-
-        if let outboundHandler = self.outboundHandler {
-            outboundHandler.register(ctx: self, promise: promise)
-        } else {
-            self.prev?.invokeRegister(promise: promise)
-        }
+    else {
+      self.next?.invokeChannelReadComplete()
     }
+  }
 
-   fileprivate func invokeBind(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        self.eventLoop.assertInEventLoop()
-        assert(promise.map { !$0.futureResult.isFulfilled } ?? true, "Promise \(promise!) already fulfilled")
+  fileprivate func invokeChannelWritabilityChanged() {
+    self.eventLoop.assertInEventLoop()
 
-        if let outboundHandler = self.outboundHandler {
-            outboundHandler.bind(ctx: self, to: address, promise: promise)
-        } else {
-            self.prev?.invokeBind(to: address, promise: promise)
-        }
+    if let inboundHandler = self.inboundHandler {
+      inboundHandler.channelWritabilityChanged(ctx: self)
     }
-
-    fileprivate func invokeConnect(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
-        self.eventLoop.assertInEventLoop()
-        assert(promise.map { !$0.futureResult.isFulfilled } ?? true, "Promise \(promise!) already fulfilled")
-
-        if let outboundHandler = self.outboundHandler {
-            outboundHandler.connect(ctx: self, to: address, promise: promise)
-        } else {
-            self.prev?.invokeConnect(to: address, promise: promise)
-        }
+    else {
+      self.next?.invokeChannelWritabilityChanged()
     }
+  }
 
-    fileprivate func invokeWrite(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
-        self.eventLoop.assertInEventLoop()
-        assert(promise.map { !$0.futureResult.isFulfilled } ?? true, "Promise \(promise!) already fulfilled")
+  fileprivate func invokeErrorCaught(_ error: Error) {
+    self.eventLoop.assertInEventLoop()
 
-        if let outboundHandler = self.outboundHandler {
-            outboundHandler.write(ctx: self, data: data, promise: promise)
-        } else {
-            self.prev?.invokeWrite(data, promise: promise)
-        }
+    if let inboundHandler = self.inboundHandler {
+      inboundHandler.errorCaught(ctx: self, error: error)
     }
-
-    fileprivate func invokeFlush() {
-        self.eventLoop.assertInEventLoop()
-
-        if let outboundHandler = self.outboundHandler {
-            outboundHandler.flush(ctx: self)
-        } else {
-            self.prev?.invokeFlush()
-        }
+    else {
+      self.next?.invokeErrorCaught(error)
     }
+  }
 
-    fileprivate func invokeWriteAndFlush(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
-        self.eventLoop.assertInEventLoop()
-        assert(promise.map { !$0.futureResult.isFulfilled } ?? true, "Promise \(promise!) already fulfilled")
+  fileprivate func invokeUserInboundEventTriggered(_ event: Any) {
+    self.eventLoop.assertInEventLoop()
 
-        if let outboundHandler = self.outboundHandler {
-            outboundHandler.write(ctx: self, data: data, promise: promise)
-            outboundHandler.flush(ctx: self)
-        } else {
-            self.prev?.invokeWriteAndFlush(data, promise: promise)
-        }
+    if let inboundHandler = self.inboundHandler {
+      inboundHandler.userInboundEventTriggered(ctx: self, event: event)
     }
-
-    fileprivate func invokeRead() {
-        self.eventLoop.assertInEventLoop()
-
-        if let outboundHandler = self.outboundHandler {
-            outboundHandler.read(ctx: self)
-        } else {
-            self.prev?.invokeRead()
-        }
+    else {
+      self.next?.invokeUserInboundEventTriggered(event)
     }
+  }
 
-    fileprivate func invokeClose(mode: CloseMode, promise: EventLoopPromise<Void>?) {
-        self.eventLoop.assertInEventLoop()
-        assert(promise.map { !$0.futureResult.isFulfilled } ?? true, "Promise \(promise!) already fulfilled")
+  fileprivate func invokeRegister(promise: EventLoopPromise<Void>?) {
+    self.eventLoop.assertInEventLoop()
+    assert(
+      promise.map { !$0.futureResult.isFulfilled } ?? true,
+      "Promise \(promise!) already fulfilled")
 
-        if let outboundHandler = self.outboundHandler {
-            outboundHandler.close(ctx: self, mode: mode, promise: promise)
-        } else {
-            self.prev?.invokeClose(mode: mode, promise: promise)
-        }
+    if let outboundHandler = self.outboundHandler {
+      outboundHandler.register(ctx: self, promise: promise)
     }
-
-    fileprivate func invokeTriggerUserOutboundEvent(_ event: Any, promise: EventLoopPromise<Void>?) {
-        self.eventLoop.assertInEventLoop()
-        assert(promise.map { !$0.futureResult.isFulfilled } ?? true, "Promise \(promise!) already fulfilled")
-
-        if let outboundHandler = self.outboundHandler {
-            outboundHandler.triggerUserOutboundEvent(ctx: self, event: event, promise: promise)
-        } else {
-            self.prev?.invokeTriggerUserOutboundEvent(event, promise: promise)
-        }
+    else {
+      self.prev?.invokeRegister(promise: promise)
     }
+  }
 
-    fileprivate func invokeHandlerAdded() throws {
-        self.eventLoop.assertInEventLoop()
+  fileprivate func invokeBind(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
+    self.eventLoop.assertInEventLoop()
+    assert(
+      promise.map { !$0.futureResult.isFulfilled } ?? true,
+      "Promise \(promise!) already fulfilled")
 
-        handler.handlerAdded(ctx: self)
+    if let outboundHandler = self.outboundHandler {
+      outboundHandler.bind(ctx: self, to: address, promise: promise)
     }
-
-    fileprivate func invokeHandlerRemoved() throws {
-        self.eventLoop.assertInEventLoop()
-
-        handler.handlerRemoved(ctx: self)
+    else {
+      self.prev?.invokeBind(to: address, promise: promise)
     }
+  }
+
+  fileprivate func invokeConnect(to address: SocketAddress, promise: EventLoopPromise<Void>?) {
+    self.eventLoop.assertInEventLoop()
+    assert(
+      promise.map { !$0.futureResult.isFulfilled } ?? true,
+      "Promise \(promise!) already fulfilled")
+
+    if let outboundHandler = self.outboundHandler {
+      outboundHandler.connect(ctx: self, to: address, promise: promise)
+    }
+    else {
+      self.prev?.invokeConnect(to: address, promise: promise)
+    }
+  }
+
+  fileprivate func invokeWrite(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
+    self.eventLoop.assertInEventLoop()
+    assert(
+      promise.map { !$0.futureResult.isFulfilled } ?? true,
+      "Promise \(promise!) already fulfilled")
+
+    if let outboundHandler = self.outboundHandler {
+      outboundHandler.write(ctx: self, data: data, promise: promise)
+    }
+    else {
+      self.prev?.invokeWrite(data, promise: promise)
+    }
+  }
+
+  fileprivate func invokeFlush() {
+    self.eventLoop.assertInEventLoop()
+
+    if let outboundHandler = self.outboundHandler {
+      outboundHandler.flush(ctx: self)
+    }
+    else {
+      self.prev?.invokeFlush()
+    }
+  }
+
+  fileprivate func invokeWriteAndFlush(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
+    self.eventLoop.assertInEventLoop()
+    assert(
+      promise.map { !$0.futureResult.isFulfilled } ?? true,
+      "Promise \(promise!) already fulfilled")
+
+    if let outboundHandler = self.outboundHandler {
+      outboundHandler.write(ctx: self, data: data, promise: promise)
+      outboundHandler.flush(ctx: self)
+    }
+    else {
+      self.prev?.invokeWriteAndFlush(data, promise: promise)
+    }
+  }
+
+  fileprivate func invokeRead() {
+    self.eventLoop.assertInEventLoop()
+
+    if let outboundHandler = self.outboundHandler {
+      outboundHandler.read(ctx: self)
+    }
+    else {
+      self.prev?.invokeRead()
+    }
+  }
+
+  fileprivate func invokeClose(mode: CloseMode, promise: EventLoopPromise<Void>?) {
+    self.eventLoop.assertInEventLoop()
+    assert(
+      promise.map { !$0.futureResult.isFulfilled } ?? true,
+      "Promise \(promise!) already fulfilled")
+
+    if let outboundHandler = self.outboundHandler {
+      outboundHandler.close(ctx: self, mode: mode, promise: promise)
+    }
+    else {
+      self.prev?.invokeClose(mode: mode, promise: promise)
+    }
+  }
+
+  fileprivate func invokeTriggerUserOutboundEvent(_ event: Any, promise: EventLoopPromise<Void>?) {
+    self.eventLoop.assertInEventLoop()
+    assert(
+      promise.map { !$0.futureResult.isFulfilled } ?? true,
+      "Promise \(promise!) already fulfilled")
+
+    if let outboundHandler = self.outboundHandler {
+      outboundHandler.triggerUserOutboundEvent(ctx: self, event: event, promise: promise)
+    }
+    else {
+      self.prev?.invokeTriggerUserOutboundEvent(event, promise: promise)
+    }
+  }
+
+  fileprivate func invokeHandlerAdded() throws {
+    self.eventLoop.assertInEventLoop()
+
+    handler.handlerAdded(ctx: self)
+  }
+
+  fileprivate func invokeHandlerRemoved() throws {
+    self.eventLoop.assertInEventLoop()
+
+    handler.handlerRemoved(ctx: self)
+  }
 }
 
 extension ChannelPipeline: CustomDebugStringConvertible {
-    public var debugDescription: String {
-        var desc = "ChannelPipeline (\(ObjectIdentifier(self))):\n"
-        var node = self.head?.next
-        while let ctx = node, ctx !== self.tail {
-            let inboundStr = ctx.handler is _ChannelInboundHandler ? "I" : ""
-            let outboundStr = ctx.handler is _ChannelOutboundHandler ? "O" : ""
-            desc += "        \(ctx.name) (\(type(of: ctx.handler))) [\(inboundStr)\(outboundStr)]\n"
-            node = ctx.next
-        }
-        return desc
+  public var debugDescription: String {
+    var desc = "ChannelPipeline (\(ObjectIdentifier(self))):\n"
+    var node = self.head?.next
+    while let ctx = node, ctx !== self.tail {
+      let inboundStr = ctx.handler is _ChannelInboundHandler ? "I" : ""
+      let outboundStr = ctx.handler is _ChannelOutboundHandler ? "O" : ""
+      desc += "        \(ctx.name) (\(type(of: ctx.handler))) [\(inboundStr)\(outboundStr)]\n"
+      node = ctx.next
     }
+    return desc
+  }
 }

@@ -25,78 +25,85 @@
 /// - note: It is important to manually manage the lifetime of the `FileHandle` used to create a `FileRegion`.
 public struct FileRegion {
 
-    /// The `FileHandle` that is used by this `FileRegion`.
-    public let fileHandle: FileHandle
+  /// The `FileHandle` that is used by this `FileRegion`.
+  public let fileHandle: FileHandle
 
-    private let _endIndex: UInt64
-    private var _readerIndex: _UInt56
+  private let _endIndex: UInt64
+  private var _readerIndex: _UInt56
 
-    /// The current reader index of this `FileRegion`
-    private(set) public var readerIndex: Int {
-        get {
-            return Int(self._readerIndex)
-        }
-        set {
-            self._readerIndex = _UInt56(newValue)
-        }
+  /// The current reader index of this `FileRegion`
+  private(set) public var readerIndex: Int {
+    get {
+      return Int(self._readerIndex)
     }
-
-    /// The end index of this `FileRegion`.
-    public var endIndex: Int {
-        return Int(self._endIndex)
+    set {
+      self._readerIndex = _UInt56(newValue)
     }
+  }
 
-    /// Create a new `FileRegion` from an open `FileHandle`.
-    ///
-    /// - parameters:
-    ///     - fileHandle: the `FileHandle` to use.
-    ///     - readerIndex: the index (offset) on which the reading will start.
-    ///     - endIndex: the index which represent the end of the readable portion.
-    public init(fileHandle: FileHandle, readerIndex: Int, endIndex: Int) {
-        precondition(readerIndex <= endIndex, "readerIndex(\(readerIndex) must be <= endIndex(\(endIndex).")
+  /// The end index of this `FileRegion`.
+  public var endIndex: Int {
+    return Int(self._endIndex)
+  }
 
-        self.fileHandle = fileHandle
-        self._readerIndex = _UInt56(readerIndex)
-        self._endIndex = UInt64(endIndex)
-    }
+  /// Create a new `FileRegion` from an open `FileHandle`.
+  ///
+  /// - parameters:
+  ///     - fileHandle: the `FileHandle` to use.
+  ///     - readerIndex: the index (offset) on which the reading will start.
+  ///     - endIndex: the index which represent the end of the readable portion.
+  public init(fileHandle: FileHandle, readerIndex: Int, endIndex: Int) {
+    precondition(
+      readerIndex <= endIndex,
+      "readerIndex(\(readerIndex) must be <= endIndex(\(endIndex).")
 
-    /// The number of readable bytes within this FileRegion (taking the `readerIndex` and `endIndex` into account).
-    public var readableBytes: Int {
-        return endIndex - readerIndex
-    }
+    self.fileHandle = fileHandle
+    self._readerIndex = _UInt56(readerIndex)
+    self._endIndex = UInt64(endIndex)
+  }
 
-    /// Move the readerIndex forward by `offset`.
-    public mutating func moveReaderIndex(forwardBy offset: Int) {
-        let newIndex = self.readerIndex + offset
-        assert(offset >= 0 && newIndex <= endIndex, "new readerIndex: \(newIndex), expected: range(0, \(endIndex))")
-        self.readerIndex = newIndex
-    }
+  /// The number of readable bytes within this FileRegion (taking the `readerIndex` and `endIndex` into account).
+  public var readableBytes: Int {
+    return endIndex - readerIndex
+  }
+
+  /// Move the readerIndex forward by `offset`.
+  public mutating func moveReaderIndex(forwardBy offset: Int) {
+    let newIndex = self.readerIndex + offset
+    assert(
+      offset >= 0 && newIndex <= endIndex,
+      "new readerIndex: \(newIndex), expected: range(0, \(endIndex))")
+    self.readerIndex = newIndex
+  }
 }
 
 extension FileRegion {
-    /// Create a new `FileRegion` forming a complete file.
-    ///
-    /// - parameters:
-    ///     - fileHandle: An open `FileHandle` to the file.
-    public init(fileHandle: FileHandle) throws {
-        let eof = try fileHandle.withUnsafeFileDescriptor { (fd: CInt) throws -> off_t in
-            let eof = try Posix.lseek(descriptor: fd, offset: 0, whence: SEEK_END)
-            try Posix.lseek(descriptor: fd, offset: 0, whence: SEEK_SET)
-            return eof
-        }
-        self.init(fileHandle: fileHandle, readerIndex: 0, endIndex: Int(eof))
+  /// Create a new `FileRegion` forming a complete file.
+  ///
+  /// - parameters:
+  ///     - fileHandle: An open `FileHandle` to the file.
+  public init(fileHandle: FileHandle) throws {
+    let eof = try fileHandle.withUnsafeFileDescriptor {
+      (fd: CInt) throws -> off_t in
+      let eof = try Posix.lseek(descriptor: fd, offset: 0, whence: SEEK_END)
+      try Posix.lseek(descriptor: fd, offset: 0, whence: SEEK_SET)
+      return eof
     }
-
-}
+    self.init(fileHandle: fileHandle, readerIndex: 0, endIndex: Int(eof))
+  }
+  }
 
 extension FileRegion: Equatable {
-    public static func ==(lhs: FileRegion, rhs: FileRegion) -> Bool {
-        return lhs.fileHandle === rhs.fileHandle && lhs.readerIndex == rhs.readerIndex && lhs.endIndex == rhs.endIndex
-    }
+  public static func == (lhs: FileRegion, rhs: FileRegion) -> Bool {
+    return
+      lhs.fileHandle === rhs.fileHandle && lhs.readerIndex == rhs.readerIndex && lhs.endIndex ==
+      rhs.endIndex
+  }
 }
 
 extension FileRegion: CustomStringConvertible {
-    public var description: String {
-        return "FileRegion(handle: \(self.fileHandle), readerIndex: \(self.readerIndex), endIndex: \(self.endIndex))"
-    }
+  public var description: String {
+    return
+      "FileRegion(handle: \(self.fileHandle), readerIndex: \(self.readerIndex), endIndex: \(self.endIndex))"
+  }
 }

@@ -16,59 +16,57 @@
 /// the original `Channel` is closed. Given that the original `Channel` is closed the `DeadChannelCore` should fail
 /// all operations.
 private final class DeadChannelCore: ChannelCore {
-    func localAddress0() throws -> SocketAddress {
-        throw ChannelError.ioOnClosedChannel
-    }
+  func localAddress0() throws -> SocketAddress {
+    throw ChannelError.ioOnClosedChannel
+  }
 
-    func remoteAddress0() throws -> SocketAddress {
-        throw ChannelError.ioOnClosedChannel
-    }
+  func remoteAddress0() throws -> SocketAddress {
+    throw ChannelError.ioOnClosedChannel
+  }
 
-    func register0(promise: EventLoopPromise<Void>?) {
-        promise?.fail(error: ChannelError.ioOnClosedChannel)
-    }
+  func register0(promise: EventLoopPromise<Void>?) {
+    promise?.fail(error: ChannelError.ioOnClosedChannel)
+  }
 
-    func registerAlreadyConfigured0(promise: EventLoopPromise<Void>?) {
-        promise?.fail(error: ChannelError.ioOnClosedChannel)
-    }
+  func registerAlreadyConfigured0(promise: EventLoopPromise<Void>?) {
+    promise?.fail(error: ChannelError.ioOnClosedChannel)
+  }
 
-    func bind0(to: SocketAddress, promise: EventLoopPromise<Void>?) {
-        promise?.fail(error: ChannelError.ioOnClosedChannel)
-    }
+  func bind0(to: SocketAddress, promise: EventLoopPromise<Void>?) {
+    promise?.fail(error: ChannelError.ioOnClosedChannel)
+  }
 
-    func connect0(to: SocketAddress, promise: EventLoopPromise<Void>?) {
-        promise?.fail(error: ChannelError.ioOnClosedChannel)
-    }
+  func connect0(to: SocketAddress, promise: EventLoopPromise<Void>?) {
+    promise?.fail(error: ChannelError.ioOnClosedChannel)
+  }
 
-    func write0(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
-        promise?.fail(error: ChannelError.ioOnClosedChannel)
-    }
+  func write0(_ data: NIOAny, promise: EventLoopPromise<Void>?) {
+    promise?.fail(error: ChannelError.ioOnClosedChannel)
+  }
 
-    func flush0() {
-    }
+  func flush0() {}
 
-    func read0() {
-    }
+  func read0() {}
 
-    func close0(error: Error, mode: CloseMode, promise: EventLoopPromise<Void>?) {
-        promise?.fail(error: ChannelError.alreadyClosed)
-    }
+  func close0(error: Error, mode: CloseMode, promise: EventLoopPromise<Void>?) {
+    promise?.fail(error: ChannelError.alreadyClosed)
+  }
 
-    func triggerUserOutboundEvent0(_ event: Any, promise: EventLoopPromise<Void>?) {
-        promise?.fail(error: ChannelError.ioOnClosedChannel)
-    }
+  func triggerUserOutboundEvent0(_ event: Any, promise: EventLoopPromise<Void>?) {
+    promise?.fail(error: ChannelError.ioOnClosedChannel)
+  }
 
-    func channelRead0(_ data: NIOAny) {
-        // a `DeadChannel` should never be in any running `ChannelPipeline` and therefore the `TailChannelHandler`
-        // should never invoke this.
-        fatalError("\(#function) called on DeadChannelCore")
-    }
+  func channelRead0(_ data: NIOAny) {
+    // a `DeadChannel` should never be in any running `ChannelPipeline` and therefore the `TailChannelHandler`
+    // should never invoke this.
+    fatalError("\(#function) called on DeadChannelCore")
+  }
 
-    func errorCaught0(error: Error) {
-        // a `DeadChannel` should never be in any running `ChannelPipeline` and therefore the `TailChannelHandler`
-        // should never invoke this.
-        fatalError("\(#function) called on DeadChannelCore")
-    }
+  func errorCaught0(error: Error) {
+    // a `DeadChannel` should never be in any running `ChannelPipeline` and therefore the `TailChannelHandler`
+    // should never invoke this.
+    fatalError("\(#function) called on DeadChannelCore")
+  }
 }
 
 /// This represents a `Channel` which is already closed and therefore all the operations do fail.
@@ -76,42 +74,47 @@ private final class DeadChannelCore: ChannelCore {
 /// channel as it only holds an unowned reference to the original `Channel`. `DeadChannel` serves as a replacement
 /// that can be used when the original `Channel` might no longer be valid.
 internal final class DeadChannel: Channel {
-    let eventLoop: EventLoop
-    let pipeline: ChannelPipeline
+  let eventLoop: EventLoop
+  let pipeline: ChannelPipeline
 
-    public var closeFuture: EventLoopFuture<Void> {
-        return self.eventLoop.makeSucceededFuture(result: ())
-    }
+  public var closeFuture: EventLoopFuture<Void> {
+    return self.eventLoop.makeSucceededFuture(result: ())
+  }
 
-    internal init(pipeline: ChannelPipeline) {
-        self.pipeline = pipeline
-        self.eventLoop = pipeline.eventLoop
-    }
+  internal init(pipeline: ChannelPipeline) {
+    self.pipeline = pipeline
+    self.eventLoop = pipeline.eventLoop
+  }
 
-    // This is `Channel` API so must be thread-safe.
-    var allocator: ByteBufferAllocator {
-        return ByteBufferAllocator()
-    }
+  // This is `Channel` API so must be thread-safe.
+  var allocator: ByteBufferAllocator {
+    return ByteBufferAllocator()
+  }
 
-    var localAddress: SocketAddress? {
-        return nil
-    }
+  var localAddress: SocketAddress? {
+    return nil
+  }
 
-    var remoteAddress: SocketAddress? {
-        return nil
-    }
+  var remoteAddress: SocketAddress? {
+    return nil
+  }
 
-    let parent: Channel? = nil
+  let parent: Channel? = nil
 
-    func setOption<T>(option: T, value: T.OptionType) -> EventLoopFuture<Void> where T: ChannelOption {
-        return EventLoopFuture(eventLoop: self.pipeline.eventLoop, error: ChannelError.ioOnClosedChannel, file: #file, line: #line)
-    }
+  func setOption<T>(option: T, value: T.OptionType) -> EventLoopFuture<Void>
+  where T: ChannelOption {
+    return EventLoopFuture(
+      eventLoop: self.pipeline.eventLoop,
+      error: ChannelError.ioOnClosedChannel,
+      file: #file,
+      line: #line)
+  }
 
-    func getOption<T>(option: T) -> EventLoopFuture<T.OptionType> where T: ChannelOption {
-        return eventLoop.makeFailedFuture(error: ChannelError.ioOnClosedChannel)
-    }
+  func getOption<T>(option: T) -> EventLoopFuture<T.OptionType> where T: ChannelOption {
+    return eventLoop.makeFailedFuture(error: ChannelError.ioOnClosedChannel)
+  }
 
-    let isWritable = false
-    let isActive = false
-    let _unsafe: ChannelCore = DeadChannelCore()
+  let isWritable = false
+  let isActive = false
+  let _unsafe: ChannelCore = DeadChannelCore()
 }

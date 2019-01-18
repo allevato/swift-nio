@@ -40,39 +40,40 @@
 /// - note: Like the `Channel` protocol, all methods in this protocol are
 ///     thread-safe.
 public protocol SocketOptionProvider {
-    /// The `EventLoop` which is used by this `SocketOptionProvider` for execution.
-    var eventLoop: EventLoop { get }
+  /// The `EventLoop` which is used by this `SocketOptionProvider` for execution.
+  var eventLoop: EventLoop { get }
 
-    /// Set a socket option for a given level and name to the specified value.
-    ///
-    /// This function is not memory-safe: if you set the generic type parameter incorrectly,
-    /// this function will still execute, and this can cause you to incorrectly interpret memory
-    /// and thereby read uninitialized or invalid memory. If at all possible, please use one of
-    /// the safe functions defined by this protocol.
-    ///
-    /// - parameters:
-    ///     - level: The socket option level, e.g. `SOL_SOCKET` or `IPPROTO_IP`.
-    ///     - name: The name of the socket option, e.g. `SO_REUSEADDR`.
-    ///     - value: The value to set the socket option to.
-    /// - returns: An `EventLoopFuture` that fires when the option has been set,
-    ///     or if an error has occurred.
-    func unsafeSetSocketOption<Value>(level: SocketOptionLevel, name: SocketOptionName, value: Value) -> EventLoopFuture<Void>
+  /// Set a socket option for a given level and name to the specified value.
+  ///
+  /// This function is not memory-safe: if you set the generic type parameter incorrectly,
+  /// this function will still execute, and this can cause you to incorrectly interpret memory
+  /// and thereby read uninitialized or invalid memory. If at all possible, please use one of
+  /// the safe functions defined by this protocol.
+  ///
+  /// - parameters:
+  ///     - level: The socket option level, e.g. `SOL_SOCKET` or `IPPROTO_IP`.
+  ///     - name: The name of the socket option, e.g. `SO_REUSEADDR`.
+  ///     - value: The value to set the socket option to.
+  /// - returns: An `EventLoopFuture` that fires when the option has been set,
+  ///     or if an error has occurred.
+  func unsafeSetSocketOption<Value>(level: SocketOptionLevel, name: SocketOptionName, value: Value)
+  -> EventLoopFuture<Void>
 
-    /// Obtain the value of the socket option for the given level and name.
-    ///
-    /// This function is not memory-safe: if you set the generic type parameter incorrectly,
-    /// this function will still execute, and this can cause you to incorrectly interpret memory
-    /// and thereby read uninitialized or invalid memory. If at all possible, please use one of
-    /// the safe functions defined by this protocol.
-    ///
-    /// - parameters:
-    ///     - level: The socket option level, e.g. `SOL_SOCKET` or `IPPROTO_IP`.
-    ///     - name: The name of the socket option, e.g. `SO_REUSEADDR`.
-    /// - returns: An `EventLoopFuture` containing the value of the socket option, or
-    ///     any error that occurred while retrieving the socket option.
-    func unsafeGetSocketOption<Value>(level: SocketOptionLevel, name: SocketOptionName) -> EventLoopFuture<Value>
+  /// Obtain the value of the socket option for the given level and name.
+  ///
+  /// This function is not memory-safe: if you set the generic type parameter incorrectly,
+  /// this function will still execute, and this can cause you to incorrectly interpret memory
+  /// and thereby read uninitialized or invalid memory. If at all possible, please use one of
+  /// the safe functions defined by this protocol.
+  ///
+  /// - parameters:
+  ///     - level: The socket option level, e.g. `SOL_SOCKET` or `IPPROTO_IP`.
+  ///     - name: The name of the socket option, e.g. `SO_REUSEADDR`.
+  /// - returns: An `EventLoopFuture` containing the value of the socket option, or
+  ///     any error that occurred while retrieving the socket option.
+  func unsafeGetSocketOption<Value>(level: SocketOptionLevel, name: SocketOptionName)
+  -> EventLoopFuture<Value>
 }
-
 
 // MARK:- Safe helper methods.
 // Hello code reader! All the methods in this extension are "safe" wrapper methods that define the correct
@@ -81,169 +82,179 @@ public protocol SocketOptionProvider {
 // around. As a result, if you change one, you should probably change them all.
 //
 // You are welcome to add more helper methods here, but each helper method you add must be tested.
-public extension SocketOptionProvider {
-    /// Sets the socket option SO_LINGER to `value`.
-    ///
-    /// - parameters:
-    ///     - value: The value to set SO_LINGER to.
-    /// - returns: An `EventLoopFuture` that fires when the option has been set,
-    ///     or if an error has occurred.
-    func setSoLinger(_ value: linger) -> EventLoopFuture<Void> {
-        return self.unsafeSetSocketOption(level: SocketOptionLevel(SOL_SOCKET), name: SO_LINGER, value: value)
-    }
+extension SocketOptionProvider {
+  /// Sets the socket option SO_LINGER to `value`.
+  ///
+  /// - parameters:
+  ///     - value: The value to set SO_LINGER to.
+  /// - returns: An `EventLoopFuture` that fires when the option has been set,
+  ///     or if an error has occurred.
+  public func setSoLinger(_ value: linger) -> EventLoopFuture<Void> {
+    return self.unsafeSetSocketOption(
+      level: SocketOptionLevel(SOL_SOCKET),
+      name: SO_LINGER,
+      value: value)
+  }
 
-    /// Gets the value of the socket option SO_LINGER.
-    ///
-    /// - returns: An `EventLoopFuture` containing the value of the socket option, or
-    ///     any error that occurred while retrieving the socket option.
-    func getSoLinger() -> EventLoopFuture<linger> {
-        return self.unsafeGetSocketOption(level: SocketOptionLevel(SOL_SOCKET), name: SO_LINGER)
-    }
+  /// Gets the value of the socket option SO_LINGER.
+  ///
+  /// - returns: An `EventLoopFuture` containing the value of the socket option, or
+  ///     any error that occurred while retrieving the socket option.
+  public func getSoLinger() -> EventLoopFuture<linger> {
+    return self.unsafeGetSocketOption(level: SocketOptionLevel(SOL_SOCKET), name: SO_LINGER)
+  }
 
-    /// Sets the socket option IP_MULTICAST_IF to `value`.
-    ///
-    /// - parameters:
-    ///     - value: The value to set IP_MULTICAST_IF to.
-    /// - returns: An `EventLoopFuture` that fires when the option has been set,
-    ///     or if an error has occurred.
-    func setIPMulticastIF(_ value: in_addr) -> EventLoopFuture<Void> {
-        return self.unsafeSetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_IF, value: value)
-    }
+  /// Sets the socket option IP_MULTICAST_IF to `value`.
+  ///
+  /// - parameters:
+  ///     - value: The value to set IP_MULTICAST_IF to.
+  /// - returns: An `EventLoopFuture` that fires when the option has been set,
+  ///     or if an error has occurred.
+  public func setIPMulticastIF(_ value: in_addr) -> EventLoopFuture<Void> {
+    return self.unsafeSetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_IF, value: value)
+  }
 
-    /// Gets the value of the socket option IP_MULTICAST_IF.
-    ///
-    /// - returns: An `EventLoopFuture` containing the value of the socket option, or
-    ///     any error that occurred while retrieving the socket option.
-    func getIPMulticastIF() -> EventLoopFuture<in_addr> {
-        return self.unsafeGetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_IF)
-    }
+  /// Gets the value of the socket option IP_MULTICAST_IF.
+  ///
+  /// - returns: An `EventLoopFuture` containing the value of the socket option, or
+  ///     any error that occurred while retrieving the socket option.
+  public func getIPMulticastIF() -> EventLoopFuture<in_addr> {
+    return self.unsafeGetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_IF)
+  }
 
-    /// Sets the socket option IP_MULTICAST_TTL to `value`.
-    ///
-    /// - parameters:
-    ///     - value: The value to set IP_MULTICAST_TTL to.
-    /// - returns: An `EventLoopFuture` that fires when the option has been set,
-    ///     or if an error has occurred.
-    func setIPMulticastTTL(_ value: CUnsignedChar) -> EventLoopFuture<Void> {
-        return self.unsafeSetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_TTL, value: value)
-    }
+  /// Sets the socket option IP_MULTICAST_TTL to `value`.
+  ///
+  /// - parameters:
+  ///     - value: The value to set IP_MULTICAST_TTL to.
+  /// - returns: An `EventLoopFuture` that fires when the option has been set,
+  ///     or if an error has occurred.
+  public func setIPMulticastTTL(_ value: CUnsignedChar) -> EventLoopFuture<Void> {
+    return self.unsafeSetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_TTL, value: value)
+  }
 
-    /// Gets the value of the socket option IP_MULTICAST_TTL.
-    ///
-    /// - returns: An `EventLoopFuture` containing the value of the socket option, or
-    ///     any error that occurred while retrieving the socket option.
-    func getIPMulticastTTL() -> EventLoopFuture<CUnsignedChar> {
-        return self.unsafeGetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_TTL)
-    }
+  /// Gets the value of the socket option IP_MULTICAST_TTL.
+  ///
+  /// - returns: An `EventLoopFuture` containing the value of the socket option, or
+  ///     any error that occurred while retrieving the socket option.
+  public func getIPMulticastTTL() -> EventLoopFuture<CUnsignedChar> {
+    return self.unsafeGetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_TTL)
+  }
 
-    /// Sets the socket option IP_MULTICAST_LOOP to `value`.
-    ///
-    /// - parameters:
-    ///     - value: The value to set IP_MULTICAST_LOOP to.
-    /// - returns: An `EventLoopFuture` that fires when the option has been set,
-    ///     or if an error has occurred.
-    func setIPMulticastLoop(_ value: CUnsignedChar) -> EventLoopFuture<Void> {
-        return self.unsafeSetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_LOOP, value: value)
-    }
+  /// Sets the socket option IP_MULTICAST_LOOP to `value`.
+  ///
+  /// - parameters:
+  ///     - value: The value to set IP_MULTICAST_LOOP to.
+  /// - returns: An `EventLoopFuture` that fires when the option has been set,
+  ///     or if an error has occurred.
+  public func setIPMulticastLoop(_ value: CUnsignedChar) -> EventLoopFuture<Void> {
+    return self.unsafeSetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_LOOP, value: value)
+  }
 
-    /// Gets the value of the socket option IP_MULTICAST_LOOP.
-    ///
-    /// - returns: An `EventLoopFuture` containing the value of the socket option, or
-    ///     any error that occurred while retrieving the socket option.
-    func getIPMulticastLoop() -> EventLoopFuture<CUnsignedChar> {
-        return self.unsafeGetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_LOOP)
-    }
+  /// Gets the value of the socket option IP_MULTICAST_LOOP.
+  ///
+  /// - returns: An `EventLoopFuture` containing the value of the socket option, or
+  ///     any error that occurred while retrieving the socket option.
+  public func getIPMulticastLoop() -> EventLoopFuture<CUnsignedChar> {
+    return self.unsafeGetSocketOption(level: IPPROTO_IP, name: IP_MULTICAST_LOOP)
+  }
 
-    /// Sets the socket option IPV6_MULTICAST_IF to `value`.
-    ///
-    /// - parameters:
-    ///     - value: The value to set IPV6_MULTICAST_IF to.
-    /// - returns: An `EventLoopFuture` that fires when the option has been set,
-    ///     or if an error has occurred.
-    func setIPv6MulticastIF(_ value: CUnsignedInt) -> EventLoopFuture<Void> {
-        return self.unsafeSetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_IF, value: value)
-    }
+  /// Sets the socket option IPV6_MULTICAST_IF to `value`.
+  ///
+  /// - parameters:
+  ///     - value: The value to set IPV6_MULTICAST_IF to.
+  /// - returns: An `EventLoopFuture` that fires when the option has been set,
+  ///     or if an error has occurred.
+  public func setIPv6MulticastIF(_ value: CUnsignedInt) -> EventLoopFuture<Void> {
+    return self.unsafeSetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_IF, value: value)
+  }
 
-    /// Gets the value of the socket option IPV6_MULTICAST_IF.
-    ///
-    /// - returns: An `EventLoopFuture` containing the value of the socket option, or
-    ///     any error that occurred while retrieving the socket option.
-    func getIPv6MulticastIF() -> EventLoopFuture<CUnsignedInt> {
-        return self.unsafeGetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_IF)
-    }
+  /// Gets the value of the socket option IPV6_MULTICAST_IF.
+  ///
+  /// - returns: An `EventLoopFuture` containing the value of the socket option, or
+  ///     any error that occurred while retrieving the socket option.
+  public func getIPv6MulticastIF() -> EventLoopFuture<CUnsignedInt> {
+    return self.unsafeGetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_IF)
+  }
 
-    /// Sets the socket option IPV6_MULTICAST_HOPS to `value`.
-    ///
-    /// - parameters:
-    ///     - value: The value to set IPV6_MULTICAST_HOPS to.
-    /// - returns: An `EventLoopFuture` that fires when the option has been set,
-    ///     or if an error has occurred.
-    func setIPv6MulticastHops(_ value: CInt) -> EventLoopFuture<Void> {
-        return self.unsafeSetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_HOPS, value: value)
-    }
+  /// Sets the socket option IPV6_MULTICAST_HOPS to `value`.
+  ///
+  /// - parameters:
+  ///     - value: The value to set IPV6_MULTICAST_HOPS to.
+  /// - returns: An `EventLoopFuture` that fires when the option has been set,
+  ///     or if an error has occurred.
+  public func setIPv6MulticastHops(_ value: CInt) -> EventLoopFuture<Void> {
+    return self.unsafeSetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_HOPS, value: value)
+  }
 
-    /// Gets the value of the socket option IPV6_MULTICAST_HOPS.
-    ///
-    /// - returns: An `EventLoopFuture` containing the value of the socket option, or
-    ///     any error that occurred while retrieving the socket option.
-    func getIPv6MulticastHops() -> EventLoopFuture<CInt> {
-        return self.unsafeGetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_HOPS)
-    }
+  /// Gets the value of the socket option IPV6_MULTICAST_HOPS.
+  ///
+  /// - returns: An `EventLoopFuture` containing the value of the socket option, or
+  ///     any error that occurred while retrieving the socket option.
+  public func getIPv6MulticastHops() -> EventLoopFuture<CInt> {
+    return self.unsafeGetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_HOPS)
+  }
 
-    /// Sets the socket option IPV6_MULTICAST_LOOP to `value`.
-    ///
-    /// - parameters:
-    ///     - value: The value to set IPV6_MULTICAST_LOOP to.
-    /// - returns: An `EventLoopFuture` that fires when the option has been set,
-    ///     or if an error has occurred.
-    func setIPv6MulticastLoop(_ value: CUnsignedInt) -> EventLoopFuture<Void> {
-        return self.unsafeSetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_LOOP, value: value)
-    }
+  /// Sets the socket option IPV6_MULTICAST_LOOP to `value`.
+  ///
+  /// - parameters:
+  ///     - value: The value to set IPV6_MULTICAST_LOOP to.
+  /// - returns: An `EventLoopFuture` that fires when the option has been set,
+  ///     or if an error has occurred.
+  public func setIPv6MulticastLoop(_ value: CUnsignedInt) -> EventLoopFuture<Void> {
+    return self.unsafeSetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_LOOP, value: value)
+  }
 
-    /// Gets the value of the socket option IPV6_MULTICAST_LOOP.
-    ///
-    /// - returns: An `EventLoopFuture` containing the value of the socket option, or
-    ///     any error that occurred while retrieving the socket option.
-    func getIPv6MulticastLoop() -> EventLoopFuture<CUnsignedInt> {
-        return self.unsafeGetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_LOOP)
-    }
+  /// Gets the value of the socket option IPV6_MULTICAST_LOOP.
+  ///
+  /// - returns: An `EventLoopFuture` containing the value of the socket option, or
+  ///     any error that occurred while retrieving the socket option.
+  public func getIPv6MulticastLoop() -> EventLoopFuture<CUnsignedInt> {
+    return self.unsafeGetSocketOption(level: IPPROTO_IPV6, name: IPV6_MULTICAST_LOOP)
+  }
 }
 
-
 extension BaseSocketChannel: SocketOptionProvider {
-    public func unsafeSetSocketOption<Value>(level: SocketOptionLevel, name: SocketOptionName, value: Value) -> EventLoopFuture<Void> {
-        if eventLoop.inEventLoop {
-            let promise = eventLoop.makePromise(of: Void.self)
-            executeAndComplete(promise) {
-                try setSocketOption0(level: level, name: name, value: value)
-            }
-            return promise.futureResult
-        } else {
-            return eventLoop.submit {
-                try self.setSocketOption0(level: level, name: name, value: value)
-            }
-        }
+  public func unsafeSetSocketOption<Value>(
+    level: SocketOptionLevel,
+    name: SocketOptionName,
+    value: Value
+  ) -> EventLoopFuture<Void> {
+    if eventLoop.inEventLoop {
+      let promise = eventLoop.makePromise(of: Void.self)
+      executeAndComplete(promise) {
+        try setSocketOption0(level: level, name: name, value: value)
+      }
+      return promise.futureResult
     }
+    else {
+      return eventLoop.submit {
+        try self.setSocketOption0(level: level, name: name, value: value)
+      }
+    }
+  }
 
-    public func unsafeGetSocketOption<Value>(level: SocketOptionLevel, name: SocketOptionName) -> EventLoopFuture<Value> {
-        if eventLoop.inEventLoop {
-            let promise = eventLoop.makePromise(of: Value.self)
-            executeAndComplete(promise) {
-                try getSocketOption0(level: level, name: name)
-            }
-            return promise.futureResult
-        } else {
-            return eventLoop.submit {
-                try self.getSocketOption0(level: level, name: name)
-            }
-        }
+  public func unsafeGetSocketOption<Value>(level: SocketOptionLevel, name: SocketOptionName)
+  -> EventLoopFuture<Value> {
+    if eventLoop.inEventLoop {
+      let promise = eventLoop.makePromise(of: Value.self)
+      executeAndComplete(promise) {
+        try getSocketOption0(level: level, name: name)
+      }
+      return promise.futureResult
     }
+    else {
+      return eventLoop.submit {
+        try self.getSocketOption0(level: level, name: name)
+      }
+    }
+  }
 
-    func setSocketOption0<Value>(level: SocketOptionLevel, name: SocketOptionName, value: Value) throws {
-        try self.socket.setOption(level: Int32(level), name: name, value: value)
-    }
+  func setSocketOption0<Value>(level: SocketOptionLevel, name: SocketOptionName, value: Value)
+  throws {
+    try self.socket.setOption(level: Int32(level), name: name, value: value)
+  }
 
-    func getSocketOption0<Value>(level: SocketOptionLevel, name: SocketOptionName) throws -> Value {
-        return try self.socket.getOption(level: Int32(level), name: name)
-    }
+  func getSocketOption0<Value>(level: SocketOptionLevel, name: SocketOptionName) throws -> Value {
+    return try self.socket.getOption(level: Int32(level), name: name)
+  }
 }
